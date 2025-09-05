@@ -1,0 +1,48 @@
+{
+  "encoder_config": {
+    "architecture": "resnet18",
+    "embedding_dim": 128,
+    "pretrained": false,
+    "freeze_backbone": false,
+    "dropout_rate": 0.1
+  },
+  "smote_config": {
+    "k_neighbors": 3,
+    "sampling_strategy": "auto",
+    "random_state": null,
+    "use_clustering": true,
+    "cluster_method": "kmeans",
+    "n_clusters": null,
+    "distance_threshold": 0.5
+  },
+  "decoder_config": {
+    "decoder_type": "autoencoder",
+    "image_shape": [
+      3,
+      64,
+      64
+    ],
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "num_epochs": 10,
+    "early_stopping_patience": 10,
+    "use_perceptual_loss": true,
+    "perceptual_loss_weight": 1.0
+  },
+  "quality_config": {
+    "metrics": [
+      "mse",
+      "mae"
+    ],
+    "fid_batch_size": 50,
+    "compute_diversity": true,
+    "diversity_sample_size": 1000,
+    "quality_threshold": 0.7,
+    "generate_report": true,
+    "save_comparisons": true
+  },
+  "config_name": "demo_config",
+  "creation_timestamp": "2025-08-26T15:44:50.959509",
+  "output_dir": "basic_demo_output",
+  "seed": 42
+}
