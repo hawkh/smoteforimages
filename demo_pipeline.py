@@ -36,80 +36,8 @@ from smote_image_synthesis.smote.constrained_smote import ConstrainedSMOTE
 from smote_image_synthesis.quality.assessor import QualityAssessor
 from smote_image_synthesis.quality.reporter import QualityReporter
 from smote_image_synthesis.pipeline import SynthesisPipeline
-
-
-def create_synthetic_dataset(n_samples: int = 200, image_size: int = 64) -> Tuple[torch.Tensor, np.ndarray]:
-    """
-    Create a synthetic dataset for demonstration.
-    
-    Args:
-        n_samples: Number of samples to generate
-        image_size: Size of square images
-        
-    Returns:
-        Tuple of (images, labels)
-    """
-    logger.info(f"Creating synthetic dataset with {n_samples} samples")
-    
-    # Create different classes with distinct patterns
-    images = []
-    labels = []
-    
-    n_per_class = n_samples // 3
-    
-    # Class 0: Horizontal stripes
-    for i in range(n_per_class):
-        img = torch.zeros(3, image_size, image_size)
-        stripe_width = 8
-        for y in range(0, image_size, stripe_width * 2):
-            img[:, y:y+stripe_width, :] = torch.rand(3, 1, 1) * 0.8 + 0.2
-        
-        # Add noise
-        img += torch.randn_like(img) * 0.1
-        img = torch.clamp(img, 0, 1)
-        
-        images.append(img)
-        labels.append(0)
-    
-    # Class 1: Vertical stripes
-    for i in range(n_per_class):
-        img = torch.zeros(3, image_size, image_size)
-        stripe_width = 8
-        for x in range(0, image_size, stripe_width * 2):
-            img[:, :, x:x+stripe_width] = torch.rand(3, 1, 1) * 0.8 + 0.2
-        
-        # Add noise
-        img += torch.randn_like(img) * 0.1
-        img = torch.clamp(img, 0, 1)
-        
-        images.append(img)
-        labels.append(1)
-    
-    # Class 2: Checkerboard pattern
-    for i in range(n_samples - 2 * n_per_class):
-        img = torch.zeros(3, image_size, image_size)
-        square_size = 16
-        
-        for y in range(0, image_size, square_size):
-            for x in range(0, image_size, square_size):
-                if (y // square_size + x // square_size) % 2 == 0:
-                    color = torch.rand(3) * 0.8 + 0.2
-                    img[:, y:y+square_size, x:x+square_size] = color.view(3, 1, 1)
-        
-        # Add noise
-        img += torch.randn_like(img) * 0.1
-        img = torch.clamp(img, 0, 1)
-        
-        images.append(img)
-        labels.append(2)
-    
-    images_tensor = torch.stack(images)
-    labels_array = np.array(labels)
-    
-    logger.info(f"Dataset created with shape {images_tensor.shape}")
-    logger.info(f"Class distribution: {np.bincount(labels_array)}")
-    
-    return images_tensor, labels_array
+from smote_image_synthesis.utils.data_creation import create_synthetic_dataset
+from smote_image_synthesis.utils.visualization import save_comparison_plot
 
 
 def setup_pipeline(config: PipelineConfig, device: torch.device) -> SynthesisPipeline:
@@ -255,7 +183,7 @@ def run_pipeline_demo(args):
     config.decoder_config.image_shape = (3, 64, 64)
     config.decoder_config.decoder_type = args.decoder_type
     config.decoder_config.num_epochs = 10  # Reduced for demo
-    config.smote_config.k_neighbors = 3
+    config.smote_config.k_neighbors = 1
     config.quality_config.metrics = ['mse', 'mae']  # Simple metrics for demo
     
     # Save configuration
@@ -333,38 +261,14 @@ def run_pipeline_demo(args):
     
     # Save some sample images
     logger.info("Saving sample images")
-    
-    import matplotlib.pyplot as plt
-    
-    # Create comparison plot
-    n_display = min(8, len(synthetic_images))
-    fig, axes = plt.subplots(2, n_display, figsize=(2*n_display, 4))
-    
-    for i in range(n_display):
-        # Real images (top row)
-        real_img = images[i].permute(1, 2, 0).cpu().numpy()
-        axes[0, i].imshow(real_img)
-        axes[0, i].set_title(f'Real (Class {labels[i]})')
-        axes[0, i].axis('off')
-        
-        # Synthetic images (bottom row)
-        synth_img = synthetic_images[i].permute(1, 2, 0).cpu().detach().numpy()
-        if synth_img.min() < 0:  # Normalize if needed
-            synth_img = (synth_img + 1) / 2
-        synth_img = np.clip(synth_img, 0, 1)
-        
-        axes[1, i].imshow(synth_img)
-        axes[1, i].set_title(f'Synthetic (Class {synthetic_labels[i]})')
-        axes[1, i].axis('off')
-    
-    plt.suptitle('Real vs Synthetic Images Comparison')
-    plt.tight_layout()
-    
     sample_path = output_dir / "sample_comparison.png"
-    plt.savefig(sample_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    logger.info(f"Sample comparison saved to {sample_path}")
+    save_comparison_plot(
+        output_path=sample_path,
+        real_images=images,
+        real_labels=labels,
+        synthetic_images=synthetic_images,
+        synthetic_labels=synthetic_labels,
+    )
     
     logger.info("Pipeline demonstration complete!")
     logger.info(f"Results saved to: {output_dir}")
@@ -409,7 +313,7 @@ def main():
     parser.add_argument(
         '--train-decoder', 
         action='store_true',
-        help='Whether to train the decoder (takes longer but better quality)'
+        help='Whether to train the. decoder (takes longer but better quality)'
     )
     
     parser.add_argument(
