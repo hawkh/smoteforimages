@@ -55,10 +55,11 @@ def create_synthetic_dataset(n_samples: int = 200, image_size: int = 64) -> Tupl
     images = []
     labels = []
     
-    n_per_class = n_samples // 3
+    # Create imbalanced distribution
+    class_sizes = [int(n_samples * 0.5), int(n_samples * 0.3), int(n_samples * 0.2)]
     
-    # Class 0: Horizontal stripes
-    for i in range(n_per_class):
+    # Class 0: Horizontal stripes (majority)
+    for i in range(class_sizes[0]):
         img = torch.zeros(3, image_size, image_size)
         stripe_width = 8
         for y in range(0, image_size, stripe_width * 2):
@@ -71,8 +72,8 @@ def create_synthetic_dataset(n_samples: int = 200, image_size: int = 64) -> Tupl
         images.append(img)
         labels.append(0)
     
-    # Class 1: Vertical stripes
-    for i in range(n_per_class):
+    # Class 1: Vertical stripes (minority)
+    for i in range(class_sizes[1]):
         img = torch.zeros(3, image_size, image_size)
         stripe_width = 8
         for x in range(0, image_size, stripe_width * 2):
@@ -85,8 +86,8 @@ def create_synthetic_dataset(n_samples: int = 200, image_size: int = 64) -> Tupl
         images.append(img)
         labels.append(1)
     
-    # Class 2: Checkerboard pattern
-    for i in range(n_samples - 2 * n_per_class):
+    # Class 2: Checkerboard pattern (minority)
+    for i in range(class_sizes[2]):
         img = torch.zeros(3, image_size, image_size)
         square_size = 16
         
@@ -271,12 +272,7 @@ def run_pipeline_demo(args):
     
     # Fit pipeline (this encodes images and fits SMOTE)
     logger.info("Fitting pipeline on training data")
-    pipeline.fit(images, labels)
-    
-    # Train decoder if requested
-    if args.train_decoder:
-        embeddings = pipeline.encoder.encode(images)
-        train_decoder(pipeline.decoder, images, embeddings, config)
+    pipeline.fit(images, labels, train_decoder=args.train_decoder, decoder_epochs=50)
     
     # Generate synthetic images
     logger.info("Generating synthetic images")

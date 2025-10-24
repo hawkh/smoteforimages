@@ -214,11 +214,157 @@ class QualityAssessor:
         return 1.0 / (1.0 + mse)
         
     def _compute_lpips(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
-        """Compute LPIPS (placeholder)."""
-        # Placeholder - would use actual LPIPS implementation
-        return 0.5
+        """Compute LPIPS (simplified implementation)."""
+        # Simplified LPIPS using VGG features
+        if not hasattr(self, 'vgg_model'):
+            self.vgg_model = models.vgg16(pretrained=True).features[:16].eval().to(self.device)
+        
+        # Extract features
+        with torch.no_grad():
+            syn_features = self.vgg_model(synthetic.to(self.device))
+            real_features = self.vgg_model(real.to(self.device))
+        
+        # Compute perceptual distance
+        lpips_score = torch.mean((syn_features - real_features) ** 2)
+        return lpips_score.item()
         
     def _compute_fid(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
-        """Compute FID (placeholder)."""
-        # Placeholder - would use actual FID implementation
-        return 50.0
+        """Compute Fréchet Inception Distance."""
+        # Extract features using Inception network
+        synthetic_features = self._extract_inception_features(synthetic)
+        real_features = self._extract_inception_features(real)
+        
+        # Compute FID
+        mu1, sigma1 = np.mean(synthetic_features, axis=0), np.cov(synthetic_features, rowvar=False)
+        mu2, sigma2 = np.mean(real_features, axis=0), np.cov(real_features, rowvar=False)
+        
+        # Calculate FID
+        diff = mu1 - mu2
+        covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+        
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
+        
+        fid = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2 * covmean)
+        return float(fid)
+    
+    def _compute_psnr(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
+        """Compute Peak Signal-to-Noise Ratio."""
+        mse = self._compute_mse(synthetic, real)
+        if mse == 0:
+            return float('inf')
+        return 20 * np.log10(1.0 / np.sqrt(mse))
+    
+    def _compute_mae(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
+        """Compute Mean Absolute Error."""
+        mae = torch.mean(torch.abs(synthetic - real))
+        return mae.item()
+    
+    def _compute_ms_ssim(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
+        """Compute Multi-Scale SSIM (simplified)."""
+        # Simplified MS-SSIM - compute SSIM at multiple scales
+        scales = [1.0, 0.5, 0.25]
+        ssim_scores = []
+        
+        for scale in scales:
+            if scale < 1.0:
+                h, w = synthetic.shape[-2:]
+                new_h, new_w = int(h * scale), int(w * scale)
+                if new_h < 4 or new_w < 4:  # Skip too small scales
+                    continue
+                
+                syn_scaled = F.interpolate(synthetic, size=(new_h, new_w), mode='bilinear')
+                real_scaled = F.interpolate(real, size=(new_h, new_w), mode='bilinear')
+            else:
+                syn_scaled, real_scaled = synthetic, real
+            
+            ssim = self._compute_ssim(syn_scaled, real_scaled)
+            ssim_scores.append(ssim)
+        
+        return np.mean(ssim_scores) if ssim_scores else 0.0
+    
+    def _extract_inception_features(self, images: torch.Tensor) -> np.ndarray:
+        """Extract features using Inception network for FID computation."""
+        # Resize images to 299x299 for Inception
+        if images.shape[-1] != 299 or images.shape[-2] != 299:
+            images = F.interpolate(images, size=(299, 299), mode='bilinear')
+        
+        # Convert to RGB if grayscale
+        if images.shape[1] == 1:
+            images = images.repeat(1, 3, 1, 1)
+        
+        features = []
+        
+        # Process in batches
+        for i in range(0, len(images), self.fid_batch_size):
+            batch = images[i:i + self.fid_batch_size].to(self.device)
+            
+            with torch.no_grad():
+                batch_features = self.inception_model(batch)
+                features.append(batch_features.cpu().numpy())
+        
+        return np.concatenate(features, axis=0)
+    
+    def _initialize_metric_computers(self) -> None:
+        """Initialize models and components for metric computation."""
+        # Initialize Inception model for FID
+        if 'fid' in self.metrics:
+            try:
+                self.inception_model = models.inception_v3(pretrained=True, transform_input=False)
+                self.inception_model.fc = nn.Identity()  # Remove final classification layer
+                self.inception_model.eval()
+                self.inception_model.to(self.device)
+                logger.info("Initialized Inception model for FID computation")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Inception model: {e}")
+        
+        # Initialize LPIPS model if needed
+        if 'lpips' in self.metrics:
+            try:
+                # Placeholder for LPIPS model initialization
+                # In practice, you would load a pre-trained LPIPS model
+                logger.info("LPIPS model initialization (placeholder)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize LPIPS model: {e}")
+    
+    def _validate_inputs(self, synthetic: torch.Tensor, real: torch.Tensor) -> None:
+        """Validate input tensors."""
+        if not isinstance(synthetic, torch.Tensor) or not isinstance(real, torch.Tensor):
+            raise TypeError("Inputs must be torch tensors")
+        
+        if len(synthetic.shape) != 4 or len(real.shape) != 4:
+            raise ValueError("Images must be 4D tensors [B, C, H, W]")
+        
+        if synthetic.shape[1:] != real.shape[1:]:
+            raise ValueError(f"Image shapes must match: {synthetic.shape[1:]} vs {real.shape[1:]}")
+        
+        if synthetic.shape[0] == 0 or real.shape[0] == 0:
+            raise ValueError("Batch size cannot be zero")
+    
+    def _compute_detailed_analysis(self, synthetic: torch.Tensor, real: torch.Tensor) -> Dict[str, Any]:
+        """Compute detailed analysis including statistical comparisons."""
+        analysis = {}
+        
+        # Basic statistics
+        syn_stats = {
+            'mean': float(torch.mean(synthetic)),
+            'std': float(torch.std(synthetic)),
+            'min': float(torch.min(synthetic)),
+            'max': float(torch.max(synthetic))
+        }
+        
+        real_stats = {
+            'mean': float(torch.mean(real)),
+            'std': float(torch.std(real)),
+            'min': float(torch.min(real)),
+            'max': float(torch.max(real))
+        }
+        
+        analysis['synthetic_stats'] = syn_stats
+        analysis['real_stats'] = real_stats
+        
+        # Distribution comparison
+        analysis['mean_difference'] = abs(syn_stats['mean'] - real_stats['mean'])
+        analysis['std_difference'] = abs(syn_stats['std'] - real_stats['std'])
+        
+        return analysis

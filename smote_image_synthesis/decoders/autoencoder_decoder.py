@@ -88,19 +88,16 @@ class AutoencoderDecoder(BaseDecoder):
         c, h, w = self.image_shape
         target_size = c * h * w
         
-        # Create progressive scaling from embedding_dim to target_size
-        hidden_dims = []
-        current_dim = self.embedding_dim
+        # Use simple default dimensions to avoid memory issues
+        if self.embedding_dim <= 128:
+            return [256, 512]
+        elif self.embedding_dim <= 256:
+            return [512, 1024]
+        else:
+            return [1024, 2048]
         
-        while current_dim < target_size // 4:
-            current_dim = min(current_dim * 2, 2048)  # Cap at 2048
-            hidden_dims.append(current_dim)
-        
-        # Add final dimensions for spatial upsampling
-        spatial_dims = [target_size // 4, target_size // 2]
-        hidden_dims.extend(spatial_dims)
-        
-        return hidden_dims
+        # Fallback for very large embeddings
+        return [self.embedding_dim * 2, self.embedding_dim * 4]
     
     def _build_model(self) -> nn.Module:
         """Build the autoencoder decoder model."""

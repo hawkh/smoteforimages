@@ -38,13 +38,16 @@ class SynthesisPipeline:
         if encoder.get_embedding_dim() != decoder.get_embedding_dim():
             raise ValueError("Encoder and decoder embedding dimensions must match")
             
-    def fit(self, images: torch.Tensor, labels: np.ndarray) -> None:
+    def fit(self, images: torch.Tensor, labels: np.ndarray, 
+            train_decoder: bool = True, decoder_epochs: int = 50) -> None:
         """
         Fit the pipeline on training data.
         
         Args:
             images: Training images [B, C, H, W]
             labels: Corresponding labels [B]
+            train_decoder: Whether to train the decoder
+            decoder_epochs: Number of epochs for decoder training
         """
         # Generate embeddings
         embeddings = self.encoder.encode(images)
@@ -53,8 +56,12 @@ class SynthesisPipeline:
         # Fit SMOTE on embeddings
         self.smote.fit(embeddings_np, labels)
         
-        # Train decoder (if needed)
-        self.decoder.train_decoder(embeddings, images)
+        # Train decoder if requested
+        if train_decoder:
+            from .decoders.autoencoder_trainer import AutoencoderTrainer
+            trainer = AutoencoderTrainer(self.decoder, learning_rate=0.001)
+            trainer.train(embeddings, images, num_epochs=decoder_epochs, batch_size=16)
+            self.decoder._is_trained = True
         
     def generate_synthetic_images(self, 
                                 n_samples: Optional[int] = None) -> Tuple[torch.Tensor, np.ndarray]:

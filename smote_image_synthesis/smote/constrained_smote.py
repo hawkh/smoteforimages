@@ -252,3 +252,182 @@ class ConstrainedSMOTE:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
+    
+    def _validate_input_data(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
+        """Validate input data format and consistency."""
+        if not isinstance(embeddings, np.ndarray):
+            raise TypeError("embeddings must be a numpy array")
+        
+        if not isinstance(labels, np.ndarray):
+            raise TypeError("labels must be a numpy array")
+        
+        if len(embeddings) != len(labels):
+            raise ValueError("embeddings and labels must have same length")
+        
+        if len(embeddings) == 0:
+            raise ValueError("Empty embeddings provided")
+        
+        if embeddings.ndim != 2:
+            raise ValueError("embeddings must be 2D array")
+        
+        if labels.ndim != 1:
+            raise ValueError("labels must be 1D array")
+        
+        # Check for valid values
+        if np.any(np.isnan(embeddings)) or np.any(np.isinf(embeddings)):
+            raise ValueError("embeddings contain NaN or infinite values")
+        
+        # Check minimum samples per class
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        insufficient_classes = unique_labels[counts < self.min_samples_per_class]
+        if len(insufficient_classes) > 0:
+            logger.warning(f"Classes {insufficient_classes} have fewer than {self.min_samples_per_class} samples")
+    
+    def _apply_clustering_constraints(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
+        """Apply clustering constraints to preserve semantic structure."""
+        unique_labels = np.unique(labels)
+        
+        for label in unique_labels:
+            label_mask = labels == label
+            label_embeddings = embeddings[label_mask]
+            
+            if len(label_embeddings) < self.min_samples_per_class:
+                continue
+            
+            # Determine optimal number of clusters
+            n_clusters = self._determine_optimal_clusters(label_embeddings)
+            
+            if n_clusters > 1:
+                cluster_model = self._create_cluster_model(n_clusters)
+                cluster_labels = cluster_model.fit_predict(label_embeddings)
+                self.cluster_models[label] = cluster_model
+                
+                logger.debug(f"Class {label}: {n_clusters} clusters created")
+    
+    def _determine_optimal_clusters(self, embeddings: np.ndarray) -> int:
+        """Determine optimal number of clusters for embeddings."""
+        if self.n_clusters is not None:
+            return min(self.n_clusters, len(embeddings))
+        
+        # Use elbow method for k-means
+        max_clusters = min(5, len(embeddings) // 2)
+        if max_clusters < 2:
+            return 1
+        
+        inertias = []
+        k_range = range(1, max_clusters + 1)
+        
+        for k in k_range:
+            if k == 1:
+                inertias.append(np.sum(np.var(embeddings, axis=0)))
+            else:
+                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
+                kmeans.fit(embeddings)
+                inertias.append(kmeans.inertia_)
+        
+        # Find elbow point
+        if len(inertias) < 3:
+            return 1
+        
+        # Simple elbow detection
+        diffs = np.diff(inertias)
+        second_diffs = np.diff(diffs)
+        
+        if len(second_diffs) > 0:
+            elbow_idx = np.argmax(second_diffs) + 2  # +2 because of double diff
+            return min(elbow_idx, max_clusters)
+        
+        return 2
+    
+    def _create_cluster_model(self, n_clusters: int) -> Any:
+        """Create clustering model based on specified method."""
+        if self.clustering_method == 'kmeans':
+            return KMeans(n_clusters=n_clusters, random_state=self.random_state, n_init=10)
+        elif self.clustering_method == 'dbscan':
+            return DBSCAN(eps=0.5, min_samples=2)
+        elif self.clustering_method == 'hierarchical':
+            return AgglomerativeClustering(n_clusters=n_clusters)
+        elif self.clustering_method == 'gmm':
+            return GaussianMixture(n_components=n_clusters, random_state=self.random_state)
+        else:
+            raise ValueError(f"Unknown clustering method: {self.clustering_method}")
+    
+    def _initialize_outlier_detectors(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
+        """Initialize outlier detection models for each class."""
+        unique_labels = np.unique(labels)
+        
+        for label in unique_labels:
+            label_mask = labels == label
+            label_embeddings = embeddings[label_mask]
+            
+            if len(label_embeddings) < 3:  # Need minimum samples for outlier detection
+                continue
+            
+            try:
+                if self.boundary_detection_method == 'isolation':
+                    detector = IsolationForest(
+                        contamination=self.outlier_detection_threshold,
+                        random_state=self.random_state
+                    )
+                elif self.boundary_detection_method == 'svm':
+                    detector = OneClassSVM(
+                        nu=self.outlier_detection_threshold,
+                        gamma='scale'
+                    )
+                elif self.boundary_detection_method == 'density':
+                    detector = LocalOutlierFactor(
+                        n_neighbors=min(5, len(label_embeddings) - 1),
+                        contamination=self.outlier_detection_threshold
+                    )
+                else:
+                    continue
+                
+                detector.fit(label_embeddings)
+                self.outlier_detectors[label] = detector
+                
+            except Exception as e:
+                logger.warning(f"Failed to initialize outlier detector for class {label}: {e}")
+    
+    def get_cluster_info(self) -> Dict[int, Dict[str, Any]]:
+        """Get information about clusters for each class."""
+        cluster_info = {}
+        
+        for label, model in self.cluster_models.items():
+            info = {
+                'n_clusters': getattr(model, 'n_clusters', 'unknown'),
+                'method': self.clustering_method
+            }
+            
+            if hasattr(model, 'inertia_'):
+                info['inertia'] = model.inertia_
+            
+            if hasattr(model, 'cluster_centers_'):
+                info['centers_shape'] = model.cluster_centers_.shape
+            
+            cluster_info[label] = info
+        
+        return cluster_info
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get statistics about the fitted SMOTE model."""
+        if not self.is_fitted:
+            return {'status': 'not_fitted'}
+        
+        unique_labels, counts = np.unique(self.labels, return_counts=True)
+        
+        stats = {
+            'status': 'fitted',
+            'n_samples': len(self.embeddings),
+            'n_features': self.embeddings.shape[1],
+            'n_classes': len(unique_labels),
+            'class_distribution': dict(zip(unique_labels, counts)),
+            'use_clustering': self.use_clustering,
+            'n_cluster_models': len(self.cluster_models),
+            'n_outlier_detectors': len(self.outlier_detectors),
+            'normalize_embeddings': self.normalize_embeddings
+        }
+        
+        if self.use_clustering:
+            stats['cluster_info'] = self.get_cluster_info()
+        
+        return stats

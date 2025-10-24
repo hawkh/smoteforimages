@@ -115,7 +115,7 @@ class AutoencoderTrainer:
         """Create learning rate scheduler."""
         if self.scheduler_type == 'plateau':
             return optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, mode='min', factor=0.5, patience=5, verbose=True
+                self.optimizer, mode='min', factor=0.5, patience=5
             )
         elif self.scheduler_type == 'cosine':
             return optim.lr_scheduler.CosineAnnealingLR(
