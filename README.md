@@ -6,7 +6,7 @@ A comprehensive implementation of SMOTE (Synthetic Minority Over-sampling Techni
 
 ### Core Components
 - **Advanced Image Encoders**: ResNet-based encoders with fine-tuning capabilities
-- **Multiple Decoder Architectures**: Autoencoder and VAE decoders with progressive upsampling
+- **Multiple Decoder Architectures**: Autoencoder, VAE, GAN, and Diffusion decoders with progressive upsampling
 - **Constrained SMOTE**: Enhanced SMOTE with semantic clustering and validation
 - **Comprehensive Quality Assessment**: Multiple metrics including FID, LPIPS, SSIM, and diversity measures
 - **Pipeline Orchestration**: End-to-end synthesis pipeline with memory management
@@ -17,7 +17,7 @@ A comprehensive implementation of SMOTE (Synthetic Minority Over-sampling Techni
 - ✅ **Memory Efficient**: Batch processing with automatic memory management
 - ✅ **Configurable Pipeline**: Flexible configuration system for all components
 - ✅ **Multiple Architectures**: Support for various encoder/decoder combinations
-- ✅ **Training Pipelines**: Complete training systems for autoencoder and VAE
+- ✅ **Training Pipelines**: Complete training systems for autoencoder, VAE, GAN, and Diffusion models
 - ✅ **Visualization**: Comprehensive quality reports with plots and analysis
 
 ## 📋 Requirements
@@ -120,6 +120,14 @@ python demo_pipeline.py --n-samples 200 --decoder-type vae --train-decoder --gen
 python demo_pipeline.py --help
 ```
 
+### Jupyter Notebook Examples
+
+The repository includes three example notebooks:
+
+1. `01_basic_pipeline_usage.ipynb` - Basic pipeline usage
+2. `02_decoder_architectures.ipynb` - Comparison of different decoder architectures
+3. `03_custom_dataset_integration.ipynb` - Guide for integrating custom datasets
+
 ## 🏗️ Architecture
 
 ### Pipeline Components
@@ -165,6 +173,16 @@ python demo_pipeline.py --help
   - KL divergence regularization
   - Latent space interpolation
   - Beta-VAE support
+
+- **GAN Decoder**: Generative Adversarial Network with spectral normalization
+  - Feature matching loss
+  - Progressive training
+  - Self-attention mechanisms
+
+- **Diffusion Decoder**: Denoising diffusion probabilistic model
+  - U-Net architecture
+  - DDPM/DDIM sampling
+  - Exponential moving average
 
 #### SMOTE Enhancements
 - **Semantic Clustering**: K-means, DBSCAN, hierarchical clustering
@@ -253,6 +271,8 @@ python -m pytest tests/ --cov=smote_image_synthesis --cov-report=html
 ```python
 from smote_image_synthesis.decoders.autoencoder_trainer import AutoencoderTrainer
 from smote_image_synthesis.decoders.vae_trainer import VAETrainer
+from smote_image_synthesis.decoders.gan_trainer import GANTrainer
+from smote_image_synthesis.decoders.diffusion_trainer import DiffusionTrainer
 
 # Train Autoencoder
 trainer = AutoencoderTrainer(
@@ -280,6 +300,31 @@ vae_history = vae_trainer.train(
     train_embeddings=train_embeddings,
     train_images=train_images,
     num_epochs=200
+)
+
+# Train GAN
+gan_trainer = GANTrainer(
+    gan_decoder=gan_decoder,
+    generator_lr=0.0002,
+    discriminator_lr=0.0002
+)
+
+gan_history = gan_trainer.train(
+    train_embeddings=train_embeddings,
+    train_images=train_images,
+    num_epochs=100
+)
+
+# Train Diffusion Model
+diffusion_trainer = DiffusionTrainer(
+    diffusion_decoder=diffusion_decoder,
+    learning_rate=1e-4
+)
+
+diffusion_history = diffusion_trainer.train(
+    train_embeddings=train_embeddings,
+    train_images=train_images,
+    num_epochs=100
 )
 ```
 
