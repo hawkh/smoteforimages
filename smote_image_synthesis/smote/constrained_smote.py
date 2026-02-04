@@ -235,20 +235,34 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        for label in unique_labels:
+            # Mask for original embeddings
+            org_label_mask = self.labels == label
+            org_embeddings_class = self.embeddings[org_label_mask]
+
+            if len(org_embeddings_class) == 0:
+                continue
+
+            # Mask for synthetic embeddings
+            syn_label_mask = synthetic_labels == label
+            syn_embeddings_class = synthetic_embeddings[syn_label_mask]
+            # Get indices of these synthetic samples in the original array
+            syn_indices_class = np.where(syn_label_mask)[0]
+
+            # Use NearestNeighbors for efficient distance calculation
+            nn = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(org_embeddings_class)
+            distances, _ = nn.kneighbors(syn_embeddings_class)
+
+            # Check if min distance is within threshold
+            valid_mask_class = distances.flatten() <= self.max_distance_threshold
+
+            # Add valid global indices
+            valid_indices.extend(syn_indices_class[valid_mask_class])
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
-                
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
-                    
         if valid_indices:
+            valid_indices.sort()
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
