@@ -235,20 +235,38 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_synthetic_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
+        for label in unique_synthetic_labels:
+            # Get original samples for this class
             label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+            original_embeddings = self.embeddings[label_mask]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            if len(original_embeddings) == 0:
+                continue
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+            # Get synthetic samples for this class
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            syn_embeddings = synthetic_embeddings[syn_mask]
+
+            if len(syn_embeddings) == 0:
+                continue
+
+            # Efficiently find nearest neighbors using NearestNeighbors
+            # We only need the distance to the nearest neighbor (k=1)
+            nn = NearestNeighbors(n_neighbors=1, algorithm='auto', metric='euclidean')
+            nn.fit(original_embeddings)
+            distances, _ = nn.kneighbors(syn_embeddings)
+
+            # distances is (N_syn, 1)
+            valid_mask = distances.flatten() <= self.max_distance_threshold
+
+            # Append valid indices
+            valid_indices.extend(syn_indices[valid_mask])
                     
         if valid_indices:
+            valid_indices = np.sort(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
