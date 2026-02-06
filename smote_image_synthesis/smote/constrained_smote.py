@@ -12,6 +12,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
+from scipy.spatial.distance import cdist
 import logging
 import warnings
 
@@ -234,21 +235,45 @@ class ConstrainedSMOTE:
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
             
+        # Optimization: Vectorized distance calculation using cdist
         valid_indices = []
+        unique_synth_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        # Pre-calculate indices for original embeddings to avoid repeated masking
+        original_label_indices = {}
+        unique_original_labels = np.unique(self.labels)
+        for label in unique_original_labels:
+             original_label_indices[label] = np.where(self.labels == label)[0]
+
+        for label in unique_synth_labels:
+            # Get synthetic samples for this class
+            synth_mask = synthetic_labels == label
+            synth_indices = np.where(synth_mask)[0]
+            synth_subset = synthetic_embeddings[synth_mask]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            # Get original samples for this class
+            label_indices = original_label_indices.get(label)
+            if label_indices is None or len(label_indices) == 0:
+                continue
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
-                    
-        if valid_indices:
+            label_embeddings = self.embeddings[label_indices]
+
+            # Calculate pairwise distances efficiently: (M_synth, D) vs (N_orig, D)
+            # This returns (M_synth, N_orig) distance matrix
+            dists = cdist(synth_subset, label_embeddings, metric='euclidean')
+
+            # Find minimum distance for each synthetic sample to any original sample of the same class
+            min_dists = dists.min(axis=1)
+
+            # Filter based on threshold
+            valid_subset_mask = min_dists <= self.max_distance_threshold
+
+            # Add valid indices
+            valid_indices.extend(synth_indices[valid_subset_mask])
+
+        if len(valid_indices) > 0:
+            # Sort to maintain original order, though not strictly required
+            valid_indices = np.array(sorted(valid_indices))
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
