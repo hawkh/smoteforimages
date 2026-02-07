@@ -184,7 +184,18 @@ class ConstrainedSMOTE:
             synthetic_embeddings, synthetic_labels = self._filter_by_distance(
                 synthetic_embeddings, synthetic_labels
             )
-            
+
+        # Filter to requested number of samples
+        if n_samples is not None:
+            if len(synthetic_embeddings) > n_samples:
+                indices = np.random.choice(len(synthetic_embeddings), n_samples, replace=False)
+                synthetic_embeddings = synthetic_embeddings[indices]
+                synthetic_labels = synthetic_labels[indices]
+            elif len(synthetic_embeddings) < n_samples and len(synthetic_embeddings) > 0:
+                indices = np.random.choice(len(synthetic_embeddings), n_samples, replace=True)
+                synthetic_embeddings = synthetic_embeddings[indices]
+                synthetic_labels = synthetic_labels[indices]
+
         return synthetic_embeddings, synthetic_labels
         
     def validate_embedding_space(self, embeddings: np.ndarray) -> bool:
@@ -319,9 +330,13 @@ class ConstrainedSMOTE:
         
         for k in k_range:
             if k == 1:
-                inertias.append(np.sum(np.var(embeddings, axis=0)))
+                # Optimization: Correct calculation for inertia of 1 cluster (sum of squared errors).
+                # np.var calculates variance (mean squared error), so we multiply by N.
+                inertias.append(np.sum(np.var(embeddings, axis=0)) * len(embeddings))
             else:
-                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
+                # Optimization: Reduce n_init to 1 for elbow method to speed up search.
+                # High precision is not needed for determining the number of clusters.
+                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=1)
                 kmeans.fit(embeddings)
                 inertias.append(kmeans.inertia_)
         
