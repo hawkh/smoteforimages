@@ -228,7 +228,9 @@ def test_individual_components():
         from smote_image_synthesis.smote.constrained_smote import ConstrainedSMOTE
         smote = ConstrainedSMOTE(k_neighbors=3, use_clustering=False)
         test_embeddings = np.random.randn(20, 64)
-        test_labels = np.random.choice([0, 1], 20)
+        # Ensure imbalance so SMOTE actually generates samples
+        test_labels = np.array([0] * 15 + [1] * 5)
+        np.random.shuffle(test_labels)
         smote.fit(test_embeddings, test_labels)
         synthetic_embeddings, synthetic_labels = smote.generate_synthetic(5)
         assert len(synthetic_embeddings) == 5
