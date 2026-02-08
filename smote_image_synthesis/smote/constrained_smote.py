@@ -32,7 +32,7 @@ class ConstrainedSMOTE:
                  k_neighbors: int = 5, 
                  sampling_strategy: Union[str, Dict[int, int]] = 'auto',
                  max_distance_threshold: Optional[float] = None,
-                 use_clustering: bool = True,
+                 use_clustering: bool = False,
                  n_clusters: Optional[int] = None,
                  clustering_method: str = 'kmeans',
                  cluster_validation_threshold: float = 0.7,
@@ -147,6 +147,7 @@ class ConstrainedSMOTE:
         
         # Apply clustering constraints
         if self.use_clustering:
+            logger.warning("Clustering constraints are enabled but currently experimental. This may significantly increase fitting time without affecting generation.")
             self._apply_clustering_constraints(normalized_embeddings, labels)
         
         # Initialize outlier detectors

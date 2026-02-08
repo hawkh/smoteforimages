@@ -93,15 +93,25 @@ def minimal_demo():
         # Test SMOTE
         print("5. Testing SMOTE...")
         smote = ConstrainedSMOTE(
-            k_neighbors=2,
+            k_neighbors=1,
             sampling_strategy='auto',
             random_state=42
         )
         
         # Convert to numpy for SMOTE
         embeddings_np = embeddings.detach().cpu().numpy()
-        X_resampled, y_resampled = smote.fit_resample(embeddings_np, test_labels)
+        # ConstrainedSMOTE uses fit/generate_synthetic API, not fit_resample
+        smote.fit(embeddings_np, test_labels)
+        synthetic_embeddings, synthetic_labels = smote.generate_synthetic()
         
+        # Combine original and synthetic for demo purposes
+        if len(synthetic_embeddings) > 0:
+            X_resampled = np.vstack([embeddings_np, synthetic_embeddings])
+            y_resampled = np.concatenate([test_labels, synthetic_labels])
+        else:
+            X_resampled = embeddings_np
+            y_resampled = test_labels
+
         print(f"   ✓ Original samples: {len(embeddings_np)}")
         print(f"   ✓ Resampled samples: {len(X_resampled)}")
         print(f"   ✓ Original distribution: {np.bincount(test_labels)}")
