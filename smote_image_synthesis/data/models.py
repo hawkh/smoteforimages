@@ -407,7 +407,7 @@ class SMOTEConfig:
     k_neighbors: int = 5
     sampling_strategy: str = "auto"
     random_state: Optional[int] = None
-    use_clustering: bool = True
+    use_clustering: bool = False
     cluster_method: str = "kmeans"
     n_clusters: Optional[int] = None
     distance_threshold: float = 0.5
