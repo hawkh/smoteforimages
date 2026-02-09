@@ -319,9 +319,11 @@ class ConstrainedSMOTE:
         
         for k in k_range:
             if k == 1:
-                inertias.append(np.sum(np.var(embeddings, axis=0)))
+                # Inertia for k=1 is sum of variances * N
+                inertias.append(np.sum(np.var(embeddings, axis=0)) * len(embeddings))
             else:
-                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
+                # Use 'auto' n_init (or small constant) for speed
+                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init='auto')
                 kmeans.fit(embeddings)
                 inertias.append(kmeans.inertia_)
         
@@ -342,7 +344,7 @@ class ConstrainedSMOTE:
     def _create_cluster_model(self, n_clusters: int) -> Any:
         """Create clustering model based on specified method."""
         if self.clustering_method == 'kmeans':
-            return KMeans(n_clusters=n_clusters, random_state=self.random_state, n_init=10)
+            return KMeans(n_clusters=n_clusters, random_state=self.random_state, n_init='auto')
         elif self.clustering_method == 'dbscan':
             return DBSCAN(eps=0.5, min_samples=2)
         elif self.clustering_method == 'hierarchical':
