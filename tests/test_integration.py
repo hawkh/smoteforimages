@@ -199,7 +199,7 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(synthetic_embeddings.shape[1], self.embedding_dim)
         
         # Test validation
-        is_valid, report = smote.validate_embedding_space(embeddings[:5])
+        is_valid = smote.validate_embedding_space(embeddings[:5])
         self.assertTrue(is_valid)
     
     def test_quality_assessor_basic(self):
