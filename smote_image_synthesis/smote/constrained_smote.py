@@ -158,6 +158,26 @@ class ConstrainedSMOTE:
         
         logger.info(f"ConstrainedSMOTE fitted on {len(embeddings)} samples with {len(np.unique(labels))} classes")
         return self
+
+    def fit_resample(self, X: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Fit the model and return resampled data.
+        Added for compatibility with imblearn API.
+
+        Args:
+            X: Training embeddings
+            y: Corresponding labels
+
+        Returns:
+            Tuple of (X_resampled, y_resampled)
+        """
+        self.fit(X, y)
+        synthetic_embeddings, synthetic_labels = self.generate_synthetic()
+
+        if len(synthetic_embeddings) == 0:
+            return X, y
+
+        return np.vstack([X, synthetic_embeddings]), np.concatenate([y, synthetic_labels])
         
     def generate_synthetic(self, n_samples: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -295,49 +315,62 @@ class ConstrainedSMOTE:
                 continue
             
             # Determine optimal number of clusters
-            n_clusters = self._determine_optimal_clusters(label_embeddings)
+            n_clusters, best_model = self._determine_optimal_clusters(label_embeddings)
             
             if n_clusters > 1:
-                cluster_model = self._create_cluster_model(n_clusters)
-                cluster_labels = cluster_model.fit_predict(label_embeddings)
-                self.cluster_models[label] = cluster_model
+                if best_model is not None and self.clustering_method == 'kmeans':
+                    cluster_model = best_model
+                    # Reuse fitted model
+                    # No need to fit_predict, labels_ are already computed
+                    cluster_labels = best_model.labels_
+                    self.cluster_models[label] = cluster_model
+                else:
+                    cluster_model = self._create_cluster_model(n_clusters)
+                    cluster_labels = cluster_model.fit_predict(label_embeddings)
+                    self.cluster_models[label] = cluster_model
                 
                 logger.debug(f"Class {label}: {n_clusters} clusters created")
     
-    def _determine_optimal_clusters(self, embeddings: np.ndarray) -> int:
+    def _determine_optimal_clusters(self, embeddings: np.ndarray) -> Tuple[int, Optional[Any]]:
         """Determine optimal number of clusters for embeddings."""
         if self.n_clusters is not None:
-            return min(self.n_clusters, len(embeddings))
+            return min(self.n_clusters, len(embeddings)), None
         
         # Use elbow method for k-means
         max_clusters = min(5, len(embeddings) // 2)
         if max_clusters < 2:
-            return 1
+            return 1, None
         
         inertias = []
+        models = {}
         k_range = range(1, max_clusters + 1)
         
         for k in k_range:
             if k == 1:
                 inertias.append(np.sum(np.var(embeddings, axis=0)))
             else:
-                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
+                # Optimized: n_init=3 instead of 10 for heuristic search
+                kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=3)
                 kmeans.fit(embeddings)
                 inertias.append(kmeans.inertia_)
+                models[k] = kmeans
         
         # Find elbow point
         if len(inertias) < 3:
-            return 1
+            return 1, None
         
         # Simple elbow detection
         diffs = np.diff(inertias)
         second_diffs = np.diff(diffs)
         
+        best_k = 1
         if len(second_diffs) > 0:
             elbow_idx = np.argmax(second_diffs) + 2  # +2 because of double diff
-            return min(elbow_idx, max_clusters)
-        
-        return 2
+            best_k = min(elbow_idx, max_clusters)
+        else:
+            best_k = 2
+
+        return best_k, models.get(best_k)
     
     def _create_cluster_model(self, n_clusters: int) -> Any:
         """Create clustering model based on specified method."""
