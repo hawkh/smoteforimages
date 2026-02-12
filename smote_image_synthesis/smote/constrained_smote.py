@@ -8,6 +8,7 @@ from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
@@ -235,18 +236,38 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_synthetic_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        # Pre-group original embeddings by label
+        original_by_label = {}
+        unique_original_labels = np.unique(self.labels)
+        for label in unique_original_labels:
+            original_by_label[label] = self.embeddings[self.labels == label]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+        # Group synthetic embeddings by label to process in batch
+        for label in unique_synthetic_labels:
+            if label not in original_by_label:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            current_syn_embeddings = synthetic_embeddings[syn_mask]
+            current_orig_embeddings = original_by_label[label]
+
+            if len(current_orig_embeddings) == 0:
+                continue
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+            # Calculate distances from each synthetic point to nearest original point
+            # pairwise_distances_argmin_min returns (indices, distances)
+            _, min_distances = pairwise_distances_argmin_min(
+                current_syn_embeddings, current_orig_embeddings
+            )
+
+            valid_mask = min_distances <= self.max_distance_threshold
+            valid_indices.extend(syn_indices[valid_mask])
+
+        # Sort indices to preserve original order
+        valid_indices = sorted(valid_indices)
                     
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
