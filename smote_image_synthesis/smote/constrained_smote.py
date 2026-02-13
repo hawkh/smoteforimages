@@ -9,6 +9,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
+from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
@@ -230,25 +231,48 @@ class ConstrainedSMOTE:
     def _filter_by_distance(self, 
                           synthetic_embeddings: np.ndarray, 
                           synthetic_labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized implementation using vectorized distance calculations per class.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        # Get indices for faster lookups later
+        synthetic_indices = np.arange(len(synthetic_embeddings))
+
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            # Get indices for this class in synthetic array
+            syn_mask = synthetic_labels == label
+            syn_indices_for_label = synthetic_indices[syn_mask]
+
+            # Get corresponding embeddings
+            syn_class_embeddings = synthetic_embeddings[syn_mask]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            # Get original embeddings for this class
+            orig_mask = self.labels == label
+            orig_class_embeddings = self.embeddings[orig_mask]
+
+            if len(orig_class_embeddings) > 0:
+                # Calculate distances to nearest neighbor in original set for each synthetic sample
+                # pairwise_distances_argmin_min(X, Y) returns min distance from X to Y for each x in X
+                _, distances = pairwise_distances_argmin_min(syn_class_embeddings, orig_class_embeddings)
+
+                # Filter based on threshold
+                valid_mask = distances <= self.max_distance_threshold
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+                # Add valid indices
+                valid_subset = syn_indices_for_label[valid_mask]
+                valid_indices.extend(valid_subset)
                     
         if valid_indices:
+            # Sort indices to maintain original order
+            valid_indices.sort()
+            valid_indices = np.array(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
