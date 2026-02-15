@@ -192,7 +192,8 @@ class TestResNetEncoder:
             sample_dataloader,
             num_epochs=1,
             learning_rate=1e-3,
-            unfreeze_after_epochs=0
+            unfreeze_after_epochs=0,
+            num_classes=3
         )
         
         assert 'loss' in history

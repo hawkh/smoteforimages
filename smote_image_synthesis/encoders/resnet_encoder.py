@@ -257,7 +257,8 @@ class ResNetEncoder(ImageEncoder):
         dataloader: torch.utils.data.DataLoader,
         num_epochs: int = 5,
         learning_rate: float = 1e-4,
-        unfreeze_after_epochs: int = 2
+        unfreeze_after_epochs: int = 2,
+        num_classes: Optional[int] = None
     ) -> Dict[str, list]:
         """
         Fine-tune the encoder on a specific dataset.
@@ -267,6 +268,7 @@ class ResNetEncoder(ImageEncoder):
             num_epochs: Number of training epochs
             learning_rate: Learning rate for fine-tuning
             unfreeze_after_epochs: Epoch after which to unfreeze backbone
+            num_classes: Number of classes (optional, inferred from data if not provided)
             
         Returns:
             Training history dictionary
@@ -308,8 +310,12 @@ class ResNetEncoder(ImageEncoder):
                 # For fine-tuning, we need a classification head
                 # This is a simplified version - in practice, you'd add a proper classifier
                 if not hasattr(self, 'classifier'):
-                    num_classes = len(torch.unique(labels))
-                    self.classifier = nn.Linear(self.embedding_dim, num_classes).to(self.device)
+                    if num_classes is None:
+                        # Fallback inference (risky if batch doesn't cover all classes)
+                        n_classes = int(labels.max().item()) + 1
+                    else:
+                        n_classes = num_classes
+                    self.classifier = nn.Linear(self.embedding_dim, n_classes).to(self.device)
                 
                 logits = self.classifier(embeddings)
                 loss = criterion(logits, labels)
