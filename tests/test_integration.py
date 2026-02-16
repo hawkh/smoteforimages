@@ -175,10 +175,16 @@ class TestIntegration(unittest.TestCase):
     
     def test_constrained_smote_basic(self):
         """Test basic ConstrainedSMOTE functionality."""
-        # Create test data with sufficient samples
-        n_samples = 20
-        embeddings = np.random.randn(n_samples, self.embedding_dim)
-        labels = np.random.randint(0, self.n_classes, n_samples)
+        # Create imbalanced test data with sufficient samples
+        # Class 0: 20 samples, Class 1: 5 samples, Class 2: 5 samples
+        n_maj = 20
+        n_min = 5
+        embeddings = np.random.randn(n_maj + 2*n_min, self.embedding_dim)
+        labels = np.concatenate([
+            np.zeros(n_maj, dtype=int),
+            np.ones(n_min, dtype=int),
+            np.full(n_min, 2, dtype=int)
+        ])
         
         smote = ConstrainedSMOTE(
             k_neighbors=3,
@@ -199,9 +205,58 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(synthetic_embeddings.shape[1], self.embedding_dim)
         
         # Test validation
-        is_valid, report = smote.validate_embedding_space(embeddings[:5])
+        is_valid = smote.validate_embedding_space(embeddings[:5])
         self.assertTrue(is_valid)
     
+    def test_constrained_smote_with_distance_threshold(self):
+        """Test ConstrainedSMOTE with distance threshold."""
+        # Create imbalanced test data with sufficient samples per class
+        # Class 0: 20 samples, Class 1: 5 samples, Class 2: 5 samples
+        n_maj = 20
+        n_min = 5
+        n_samples = n_maj + 2 * n_min
+        embeddings = np.random.randn(n_samples, self.embedding_dim)
+        labels = np.concatenate([
+            np.zeros(n_maj, dtype=int),
+            np.ones(n_min, dtype=int),
+            np.full(n_min, 2, dtype=int)
+        ])
+
+        # Use a large threshold to ensure some samples pass
+        smote = ConstrainedSMOTE(
+            k_neighbors=3,
+            sampling_strategy='auto',
+            max_distance_threshold=100.0, # Large threshold
+            use_clustering=False,
+            normalize_embeddings=False
+        )
+
+        # Test fitting
+        smote.fit(embeddings, labels)
+        self.assertTrue(smote.is_fitted)
+
+        # Test generation
+        synthetic_embeddings, synthetic_labels = smote.generate_synthetic()
+
+        self.assertGreater(len(synthetic_embeddings), 0)
+        self.assertEqual(len(synthetic_embeddings), len(synthetic_labels))
+
+        # Create a new instance with small threshold
+        smote_strict = ConstrainedSMOTE(
+            k_neighbors=3,
+            sampling_strategy='auto',
+            max_distance_threshold=0.001, # Very small threshold
+            use_clustering=False,
+            normalize_embeddings=False
+        )
+        smote_strict.fit(embeddings, labels)
+
+        synthetic_embeddings_strict, synthetic_labels_strict = smote_strict.generate_synthetic()
+
+        # Just check that it runs without error and returns valid arrays
+        self.assertTrue(isinstance(synthetic_embeddings_strict, np.ndarray))
+        self.assertTrue(isinstance(synthetic_labels_strict, np.ndarray))
+
     def test_quality_assessor_basic(self):
         """Test basic QualityAssessor functionality."""
         assessor = QualityAssessor(
@@ -296,9 +351,16 @@ class TestIntegration(unittest.TestCase):
         )
         
         # Create larger test dataset for SMOTE
-        n_train = 12  # Minimum for SMOTE to work
-        train_images = torch.randn(n_train, *self.image_shape)
-        train_labels = np.array([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
+        # Make it imbalanced so SMOTE generates something
+        n_maj = 5
+        n_min = 3
+        # Class 0: 5, Class 1: 3, Class 2: 3
+        train_labels = np.concatenate([
+            np.zeros(n_maj, dtype=int),
+            np.ones(n_min, dtype=int),
+            np.full(n_min, 2, dtype=int)
+        ])
+        train_images = torch.randn(len(train_labels), *self.image_shape)
         
         # Test pipeline fitting
         pipeline.fit(train_images, train_labels)
@@ -315,7 +377,7 @@ class TestIntegration(unittest.TestCase):
             quality_results = pipeline.evaluate_quality(
                 synthetic_images[:4], train_images[:4]
             )
-            self.assertIn('mse', quality_results)
+            self.assertIn('mse', quality_results['metrics'])
     
     def test_error_handling(self):
         """Test error handling in components."""
