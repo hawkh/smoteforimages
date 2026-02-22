@@ -175,10 +175,16 @@ class TestIntegration(unittest.TestCase):
     
     def test_constrained_smote_basic(self):
         """Test basic ConstrainedSMOTE functionality."""
-        # Create test data with sufficient samples
-        n_samples = 20
+        # Create test data with sufficient samples and imbalance to trigger SMOTE
+        n_samples = 30
         embeddings = np.random.randn(n_samples, self.embedding_dim)
-        labels = np.random.randint(0, self.n_classes, n_samples)
+        # Ensure imbalance: class 0 (12), class 1 (12), class 2 (6)
+        # All have >= 4 samples for k_neighbors=3
+        labels = np.concatenate([
+            np.zeros(12, dtype=int),
+            np.ones(12, dtype=int),
+            np.full(6, 2, dtype=int)
+        ])
         
         smote = ConstrainedSMOTE(
             k_neighbors=3,
@@ -199,7 +205,7 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(synthetic_embeddings.shape[1], self.embedding_dim)
         
         # Test validation
-        is_valid, report = smote.validate_embedding_space(embeddings[:5])
+        is_valid = smote.validate_embedding_space(embeddings[:5])
         self.assertTrue(is_valid)
     
     def test_quality_assessor_basic(self):
@@ -298,7 +304,9 @@ class TestIntegration(unittest.TestCase):
         # Create larger test dataset for SMOTE
         n_train = 12  # Minimum for SMOTE to work
         train_images = torch.randn(n_train, *self.image_shape)
-        train_labels = np.array([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
+        # Imbalance to trigger SMOTE: 0(5), 1(4), 2(3)
+        # All have >= 3 samples for k_neighbors=2
+        train_labels = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2])
         
         # Test pipeline fitting
         pipeline.fit(train_images, train_labels)
@@ -312,10 +320,12 @@ class TestIntegration(unittest.TestCase):
         
         # Test quality evaluation
         if len(synthetic_images) > 0:
+            n_eval = min(len(synthetic_images), 4)
             quality_results = pipeline.evaluate_quality(
-                synthetic_images[:4], train_images[:4]
+                synthetic_images[:n_eval], train_images[:n_eval]
             )
-            self.assertIn('mse', quality_results)
+            self.assertIn('metrics', quality_results)
+            self.assertIn('mse', quality_results['metrics'])
     
     def test_error_handling(self):
         """Test error handling in components."""
