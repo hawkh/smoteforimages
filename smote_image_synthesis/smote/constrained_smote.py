@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
+from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
@@ -234,24 +235,44 @@ class ConstrainedSMOTE:
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
             
-        valid_indices = []
+        # Optimize filtering using vectorized operations per class
+        keep_mask = np.zeros(len(synthetic_embeddings), dtype=bool)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        # Pre-group original embeddings by label for faster access
+        unique_labels = np.unique(self.labels)
+        original_by_label = {}
+        for label in unique_labels:
+            original_by_label[label] = self.embeddings[self.labels == label]
+
+        # Process each class present in synthetic data
+        syn_unique_labels = np.unique(synthetic_labels)
+
+        for label in syn_unique_labels:
+            if label not in original_by_label:
+                continue
+
+            # Get mask for synthetic samples of this class
+            syn_mask = synthetic_labels == label
+            syn_class_embeddings = synthetic_embeddings[syn_mask]
+
+            orig_class_embeddings = original_by_label[label]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            if len(orig_class_embeddings) > 0:
+                # specific optimization: calculate min distance to ANY original sample of the same class
+                # pairwise_distances_argmin_min returns (indices, distances)
+                _, min_distances = pairwise_distances_argmin_min(syn_class_embeddings, orig_class_embeddings)
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+                # Update mask for valid samples
+                valid_class_mask = min_distances <= self.max_distance_threshold
+                keep_mask[syn_mask] = valid_class_mask
                     
-        if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
+        # Filter using the boolean mask
+        if np.any(keep_mask):
+            return synthetic_embeddings[keep_mask], synthetic_labels[keep_mask]
         else:
-            return np.array([]), np.array([])
+            # Return empty arrays with correct dimensionality if possible,
+            # but consistent with original behavior of returning empty arrays
+            return np.empty((0, synthetic_embeddings.shape[1])), np.array([])
     
     def _validate_input_data(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
         """Validate input data format and consistency."""
