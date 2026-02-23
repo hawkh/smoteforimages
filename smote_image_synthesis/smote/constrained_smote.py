@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
+from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
@@ -235,20 +236,34 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
+        for label in unique_labels:
+            # Indices of synthetic samples with this label
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+
+            if len(syn_indices) == 0:
+                continue
+
+            syn_emb = synthetic_embeddings[syn_indices]
+
+            # Find original embeddings of same class
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
             
             if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+                # Calculate minimum distance from each synthetic sample to any original sample
+                _, distances = pairwise_distances_argmin_min(syn_emb, label_embeddings)
+
+                # Check threshold
+                valid_mask = distances <= self.max_distance_threshold
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+                # Add indices of valid samples
+                valid_indices.extend(syn_indices[valid_mask])
                     
         if valid_indices:
+            valid_indices = sorted(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
