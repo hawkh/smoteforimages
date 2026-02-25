@@ -199,7 +199,7 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(synthetic_embeddings.shape[1], self.embedding_dim)
         
         # Test validation
-        is_valid, report = smote.validate_embedding_space(embeddings[:5])
+        is_valid = smote.validate_embedding_space(embeddings[:5])
         self.assertTrue(is_valid)
     
     def test_quality_assessor_basic(self):
@@ -296,9 +296,11 @@ class TestIntegration(unittest.TestCase):
         )
         
         # Create larger test dataset for SMOTE
-        n_train = 12  # Minimum for SMOTE to work
+        # Use imbalanced data to ensure SMOTE generates samples
+        n_train = 15
         train_images = torch.randn(n_train, *self.image_shape)
-        train_labels = np.array([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
+        # Class 0: 8 samples, Class 1: 4 samples, Class 2: 3 samples (needs > k_neighbors=2)
+        train_labels = np.array([0] * 8 + [1] * 4 + [2] * 3)
         
         # Test pipeline fitting
         pipeline.fit(train_images, train_labels)
@@ -315,7 +317,7 @@ class TestIntegration(unittest.TestCase):
             quality_results = pipeline.evaluate_quality(
                 synthetic_images[:4], train_images[:4]
             )
-            self.assertIn('mse', quality_results)
+            self.assertIn('mse', quality_results['metrics'])
     
     def test_error_handling(self):
         """Test error handling in components."""
