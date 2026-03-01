@@ -230,25 +230,43 @@ class ConstrainedSMOTE:
     def _filter_by_distance(self, 
                           synthetic_embeddings: np.ndarray, 
                           synthetic_labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized to use vectorized nearest neighbors instead of O(N*M) looping.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        for label in unique_labels:
+            # Get original embeddings for this class
+            orig_mask = self.labels == label
+            orig_label_embeddings = self.embeddings[orig_mask]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            if len(orig_label_embeddings) == 0:
+                continue
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
-                    
+            # Get synthetic embeddings for this class
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            syn_label_embeddings = synthetic_embeddings[syn_mask]
+
+            if len(syn_label_embeddings) == 0:
+                continue
+
+            # Use KDTree/BallTree for efficient distance queries
+            nn = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(orig_label_embeddings)
+            distances, _ = nn.kneighbors(syn_label_embeddings)
+
+            # Filter by threshold
+            valid_mask = distances.flatten() <= self.max_distance_threshold
+            valid_indices.extend(syn_indices[valid_mask])
+
         if valid_indices:
+            # Sort indices to maintain original ordering
+            valid_indices = sorted(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
