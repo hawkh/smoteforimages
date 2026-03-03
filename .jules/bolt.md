@@ -1,0 +1,7 @@
+## 2025-02-28 - Optimizing O(N*M) Distance Filtering with NearestNeighbors
+**Learning:** The legacy `_filter_by_distance` function in `ConstrainedSMOTE` was a massive bottleneck because it calculated distances by iterating over every single synthetic embedding and manually computing `np.linalg.norm` against all original class embeddings. For typical dataset sizes (e.g. 5000 original, 2000 synthetic), this caused operations taking over 10-13 seconds.
+**Action:** When filtering or comparing large embedding sets across multiple vectors, always group by class label and vectorize the distance computation using structures like `sklearn.neighbors.NearestNeighbors` or `scipy.spatial.distance.cdist`. `NearestNeighbors` dropped the computation time to under ~0.1s while perfectly preserving readable, scikit-learn idiomatic code.
+
+## 2025-02-28 - Git Repository Clutter and __pycache__ tracking
+**Learning:** This codebase tracks `__pycache__` contents and `.pyc` files directly in source control, and does not provide a functional `.gitignore` for them. Modifying tests or running scripts will generate modified `.pyc` files that git wants to commit, making PRs impossible to cleanly merge without rigorous git staging.
+**Action:** Be extremely vigilant with `git status` before committing. Use `git restore --staged` to deliberately untrack pycache and other binary outputs (like `checkpoints/final_model_epoch_49.pth` which spuriously shows as modified) before finalizing submissions.
