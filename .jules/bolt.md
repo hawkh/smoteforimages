@@ -1,0 +1,3 @@
+## 2024-05-31 - [Distance Filter Vectorization]
+**Learning:** The legacy `_filter_by_distance` method in `ConstrainedSMOTE` is a performance bottleneck for large datasets due to its iterative implementation over embeddings. It can be drastically sped up using `sklearn.neighbors.NearestNeighbors`.
+**Action:** Replace the iterative loop with vectorization based on `NearestNeighbors` in the `ConstrainedSMOTE` class.
