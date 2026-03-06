@@ -235,20 +235,37 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
+        # Pre-compute NearestNeighbors models for each class in the original data
+        nn_models = {}
+        for label in unique_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            
             if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+                # n_neighbors=1 is sufficient since we only care about the minimum distance
+                nn = NearestNeighbors(n_neighbors=1, algorithm='auto')
+                nn.fit(label_embeddings)
+                nn_models[label] = nn
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
-                    
+        # Query nearest neighbors for synthetic embeddings grouped by class
+        for label in unique_labels:
+            if label not in nn_models:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            if len(syn_indices) == 0:
+                continue
+
+            syn_embeddings = synthetic_embeddings[syn_mask]
+            distances, _ = nn_models[label].kneighbors(syn_embeddings)
+
+            valid = distances.flatten() <= self.max_distance_threshold
+            valid_indices.extend(syn_indices[valid])
+
         if valid_indices:
+            valid_indices.sort()
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
