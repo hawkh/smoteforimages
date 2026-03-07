@@ -230,25 +230,47 @@ class ConstrainedSMOTE:
     def _filter_by_distance(self, 
                           synthetic_embeddings: np.ndarray, 
                           synthetic_labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        ⚡ Optimized: Uses NearestNeighbors grouped by unique labels to vectorize
+        distance calculations, turning an O(N * M) iterative loop into a highly
+        efficient spatial index lookup.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
+        # Fit nearest neighbor models for each relevant class in the original dataset
+        nn_models = {}
+        for label in unique_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            
             if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+                # Use algorithm='auto' which typically picks KDTree or BallTree
+                nn = NearestNeighbors(n_neighbors=1, algorithm='auto')
+                nn.fit(label_embeddings)
+                nn_models[label] = nn
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        # Query nearest neighbors in batch for each class
+        for label in unique_labels:
+            if label not in nn_models:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            syn_embs = synthetic_embeddings[syn_mask]
+
+            if len(syn_embs) > 0:
+                distances, _ = nn_models[label].kneighbors(syn_embs)
+                # distances is shape (n_queries, 1), flatten to match mask shape
+                valid_mask = distances.flatten() <= self.max_distance_threshold
+                valid_indices.extend(syn_indices[valid_mask])
                     
         if valid_indices:
+            # Re-sort indices to preserve original order
+            valid_indices = np.sort(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         else:
             return np.array([]), np.array([])
