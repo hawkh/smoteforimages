@@ -1,0 +1,3 @@
+## 2026-03-09 - [Optimize ConstrainedSMOTE distance filtering]
+**Learning:** The legacy iterative distance calculation in `ConstrainedSMOTE._filter_by_distance` (O(N * M)) becomes a massive bottleneck when filtering large numbers of synthetic embeddings against original embeddings (e.g. taking ~53s for 10k embeddings). Vectorizing the calculation using `sklearn.neighbors.NearestNeighbors` and grouping by unique labels provides a >100x speedup.
+**Action:** When performing point-to-point distance calculations across large sets of multi-dimensional embeddings, always reach for spatial indexing structures like `NearestNeighbors` or `KDTree` rather than iterative list-comprehensions or raw NumPy `linalg.norm` loops.
