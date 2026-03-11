@@ -230,23 +230,51 @@ class ConstrainedSMOTE:
     def _filter_by_distance(self, 
                           synthetic_embeddings: np.ndarray, 
                           synthetic_labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized by vectorizing the minimum distance calculation
+        per class using NearestNeighbors instead of an iterative approach.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
             
+        if len(synthetic_embeddings) == 0:
+            return np.array([]), np.array([])
+
         valid_indices = []
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        # Process by unique label to vectorize operations
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            # Get original embeddings for this label
+            orig_mask = self.labels == label
+            orig_embeddings = self.embeddings[orig_mask]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            if len(orig_embeddings) == 0:
+                continue
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
+            # Get synthetic embeddings for this label
+            synth_mask = synthetic_labels == label
+            synth_indices = np.where(synth_mask)[0]
+            synth_embs = synthetic_embeddings[synth_mask]
+
+            if len(synth_embs) == 0:
+                continue
+
+            # Fit NearestNeighbors on original embeddings of this class
+            nn = NearestNeighbors(n_neighbors=1, algorithm='auto')
+            nn.fit(orig_embeddings)
+
+            # Find minimum distances for all synthetic embeddings of this class at once
+            distances, _ = nn.kneighbors(synth_embs)
+            distances = distances.flatten()
+
+            # Filter valid indices
+            valid_mask = distances <= self.max_distance_threshold
+            valid_indices.extend(synth_indices[valid_mask])
+
+        valid_indices.sort()
                     
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
