@@ -7,8 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
+import csv
 import json
 from datetime import datetime
 import logging
@@ -52,7 +51,6 @@ class QualityReporter:
         
         # Set up matplotlib style
         plt.style.use('seaborn-v0_8')
-        sns.set_palette("husl")
         
         logger.info(f"Initialized QualityReporter with output_dir: {self.output_dir}")
     
@@ -193,7 +191,7 @@ class QualityReporter:
             plt.close()
             return str(plot_path)
         else:
-            plt.show()
+            plt.close()
             return ""
     
     def _create_radar_plot(self, ax, metrics: Dict[str, float]):
@@ -315,7 +313,7 @@ Interpretation:
             plt.close()
             return str(plot_path)
         else:
-            plt.show()
+            plt.close()
             return ""
     
     def _plot_image_comparison(self, synthetic_images: torch.Tensor, 
@@ -361,7 +359,7 @@ Interpretation:
             plt.close()
             return str(plot_path)
         else:
-            plt.show()
+            plt.close()
             return ""
     
     def _plot_distribution_analysis(self, synthetic_images: torch.Tensor, 
@@ -441,7 +439,7 @@ Distribution Similarity:
             plt.close()
             return str(plot_path)
         else:
-            plt.show()
+            plt.close()
             return ""
     
     def _plot_detailed_analysis(self, detailed_analysis: Dict[str, Any], name: str) -> str:
@@ -460,7 +458,7 @@ Distribution Similarity:
             plt.close()
             return str(plot_path)
         else:
-            plt.show()
+            plt.close()
             return ""
     
     def _generate_html_report(self, quality_results: Dict[str, Any], 
@@ -653,9 +651,12 @@ Distribution Similarity:
             for key, value in quality_results['diversity'].items():
                 all_metrics[f'diversity_{key}'] = value
         
-        # Convert to DataFrame and save
-        df = pd.DataFrame([all_metrics])
-        df.to_csv(csv_path, index=False)
+        # Write one-row CSV without requiring pandas
+        fieldnames = list(all_metrics.keys())
+        with csv_path.open('w', newline='', encoding='utf-8') as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerow(all_metrics)
         
         logger.info(f"Metrics exported to CSV: {csv_path}")
         return str(csv_path)

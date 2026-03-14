@@ -440,13 +440,10 @@ class PerceptualLoss(nn.Module):
         self.device = device
         
         if TORCHVISION_AVAILABLE:
-            # Load pre-trained VGG16 network
-            try:
-                vgg = models.vgg16(weights='VGG16_Weights.IMAGENET1K_V1').features
-            except:
-                # Fallback for older torchvision versions
-                vgg = models.vgg16(pretrained=True).features
-            
+            # Use VGG16 feature extractor without downloading pretrained weights.
+            # This keeps training/tests fully offline-compatible.
+            vgg = models.vgg16(weights=None).features
+
             vgg.eval()
             for param in vgg.parameters():
                 param.requires_grad = False

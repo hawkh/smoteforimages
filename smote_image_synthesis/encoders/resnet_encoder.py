@@ -95,7 +95,17 @@ class ResNetEncoder(ImageEncoder):
         """
         # Load base ResNet model
         resnet_class = self.SUPPORTED_ARCHITECTURES[self.architecture]
-        backbone = resnet_class(pretrained=self.pretrained)
+        if self.pretrained:
+            try:
+                backbone = resnet_class(pretrained=True)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load pretrained weights (%s). Falling back to random initialization.",
+                    exc,
+                )
+                backbone = resnet_class(pretrained=False)
+        else:
+            backbone = resnet_class(pretrained=False)
         
         # Get the number of features from the last layer
         num_features = backbone.fc.in_features
