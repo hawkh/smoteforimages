@@ -53,7 +53,7 @@ class SynthesisPipeline:
 
         # For AutoencoderDecoder: train encoder+decoder jointly end-to-end first,
         # then re-extract reconstruction-friendly embeddings for SMOTE.
-        if train_decoder and decoder_type == 'AutoencoderDecoder':
+        if train_decoder and decoder_type in ('AutoencoderDecoder', 'DCGANDecoder'):
             self._train_end_to_end(images, num_epochs=decoder_epochs)
 
         # Generate embeddings (uses the now jointly-trained encoder if applicable)
@@ -64,7 +64,7 @@ class SynthesisPipeline:
         self.smote.fit(embeddings_np, labels)
 
         # Train non-AE decoders the original way
-        if train_decoder and decoder_type != 'AutoencoderDecoder':
+        if train_decoder and decoder_type not in ('AutoencoderDecoder', 'DCGANDecoder'):
             if decoder_type == 'VAEDecoder':
                 from .decoders.vae_trainer import VAETrainer
                 trainer = VAETrainer(self.decoder, learning_rate=0.001)
