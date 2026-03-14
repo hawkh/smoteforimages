@@ -33,6 +33,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='torchvision')
 
 from smote_image_synthesis.encoders.resnet_encoder import ResNetEncoder
 from smote_image_synthesis.decoders.autoencoder_decoder import AutoencoderDecoder
+from smote_image_synthesis.decoders.dcgan_decoder import DCGANDecoder
 from smote_image_synthesis.smote.constrained_smote import ConstrainedSMOTE
 from smote_image_synthesis.quality.assessor import QualityAssessor
 from smote_image_synthesis.pipeline import SynthesisPipeline
@@ -153,8 +154,8 @@ def parse_args():
                    help='Image size to resize CIFAR to (default: 64)')
     p.add_argument('--n-synthetic', type=int, default=50,
                    help='Synthetic images to generate (default: 50)')
-    p.add_argument('--embedding-dim', type=int, default=128,
-                   help='Encoder embedding dimension (default: 128)')
+    p.add_argument('--embedding-dim', type=int, default=512,
+                   help='Encoder embedding dimension (default: 512)')
     return p.parse_args()
 
 
@@ -184,13 +185,10 @@ def main():
         freeze_backbone=False,  # Joint E2E training will update the whole encoder
     )
 
-    decoder = AutoencoderDecoder(
+    decoder = DCGANDecoder(
         embedding_dim=args.embedding_dim,
         image_shape=(3, IMAGE_SIZE, IMAGE_SIZE),
-        hidden_dims=[512, 2048],
-        use_skip_connections=False,
-        use_batch_norm=True,
-        dropout_rate=0.1,
+        base_channels=256,
         device=device,
     )
 
