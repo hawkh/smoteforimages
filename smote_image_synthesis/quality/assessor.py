@@ -15,7 +15,6 @@ from abc import ABC, abstractmethod
 from scipy import linalg
 from sklearn.metrics.pairwise import pairwise_distances
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 logger = logging.getLogger(__name__)
 

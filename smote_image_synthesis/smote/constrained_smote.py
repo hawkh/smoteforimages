@@ -151,7 +151,30 @@ class ConstrainedSMOTE:
         
         # Initialize outlier detectors
         self._initialize_outlier_detectors(normalized_embeddings, labels)
-        
+
+        # Adapt k_neighbors to available minority class size for robust fitting
+        class_counts = np.bincount(labels) if np.issubdtype(labels.dtype, np.integer) and labels.min() >= 0 else None
+        if class_counts is None or len(class_counts) == 0:
+            unique_labels, counts = np.unique(labels, return_counts=True)
+            min_class_count = int(np.min(counts)) if len(counts) else 1
+        else:
+            nonzero_counts = class_counts[class_counts > 0]
+            min_class_count = int(np.min(nonzero_counts)) if len(nonzero_counts) else 1
+
+        effective_k_neighbors = max(1, min(self.k_neighbors, min_class_count - 1))
+        if effective_k_neighbors != self.k_neighbors:
+            logger.warning(
+                "Reducing k_neighbors from %s to %s due to limited class samples",
+                self.k_neighbors,
+                effective_k_neighbors,
+            )
+
+        self.smote = SMOTE(
+            k_neighbors=effective_k_neighbors,
+            sampling_strategy=self.sampling_strategy,
+            random_state=self.random_state,
+        )
+
         # Fit base SMOTE
         self.smote.fit(normalized_embeddings, labels)
         self.is_fitted = True
@@ -173,21 +196,55 @@ class ConstrainedSMOTE:
             raise ValueError("SMOTE must be fitted before generating samples")
             
         X_resampled, y_resampled = self.smote.fit_resample(self.embeddings, self.labels)
-        
+
         # Extract only the synthetic samples
         n_original = len(self.embeddings)
         synthetic_embeddings = X_resampled[n_original:]
         synthetic_labels = y_resampled[n_original:]
-        
+
+        # Fallback for already-balanced datasets or strict strategies
+        if len(synthetic_embeddings) == 0 and n_samples is not None and n_samples > 0:
+            synthetic_embeddings, synthetic_labels = self._interpolate_samples(n_samples)
+
+        # Respect requested sample count when possible
+        if n_samples is not None and len(synthetic_embeddings) > n_samples:
+            synthetic_embeddings = synthetic_embeddings[:n_samples]
+            synthetic_labels = synthetic_labels[:n_samples]
+
         # Apply validation constraints
         if self.max_distance_threshold is not None:
             synthetic_embeddings, synthetic_labels = self._filter_by_distance(
                 synthetic_embeddings, synthetic_labels
             )
-            
+
         return synthetic_embeddings, synthetic_labels
         
-    def validate_embedding_space(self, embeddings: np.ndarray) -> bool:
+
+    def _interpolate_samples(self, n_samples: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Create synthetic samples by random in-class interpolation."""
+        rng = np.random.default_rng(self.random_state)
+        synthetic_embeddings = []
+        synthetic_labels = []
+
+        unique_labels = np.unique(self.labels)
+        for _ in range(n_samples):
+            label = int(rng.choice(unique_labels))
+            label_indices = np.where(self.labels == label)[0]
+            if len(label_indices) < 2:
+                continue
+
+            idx1, idx2 = rng.choice(label_indices, size=2, replace=False)
+            alpha = float(rng.random())
+            emb = (1.0 - alpha) * self.embeddings[idx1] + alpha * self.embeddings[idx2]
+            synthetic_embeddings.append(emb)
+            synthetic_labels.append(label)
+
+        if not synthetic_embeddings:
+            return np.array([]), np.array([])
+
+        return np.stack(synthetic_embeddings), np.array(synthetic_labels)
+
+    def validate_embedding_space(self, embeddings: np.ndarray) -> Tuple[bool, Dict[str, Any]]:
         """
         Validate if embeddings are in valid space.
         
@@ -195,17 +252,38 @@ class ConstrainedSMOTE:
             embeddings: Embeddings to validate
             
         Returns:
-            True if valid, False otherwise
+            Tuple of (is_valid, validation_report)
         """
+        report: Dict[str, Any] = {
+            'has_nan_or_inf': False,
+            'dimension_matches': True,
+            'is_fitted': self.is_fitted,
+            'expected_dim': None,
+            'input_dim': embeddings.shape[1] if embeddings.ndim == 2 else None,
+        }
+
+        if embeddings.ndim != 2:
+            report['dimension_matches'] = False
+            report['error'] = 'embeddings must be a 2D array'
+            return False, report
+
         # Check for NaN or infinity
         if np.any(np.isnan(embeddings)) or np.any(np.isinf(embeddings)):
-            return False
-            
+            report['has_nan_or_inf'] = True
+
+        if self.embeddings is None:
+            report['dimension_matches'] = False
+            report['error'] = 'SMOTE instance is not fitted'
+            return False, report
+
+        report['expected_dim'] = int(self.embeddings.shape[1])
+
         # Check dimensionality
         if embeddings.shape[1] != self.embeddings.shape[1]:
-            return False
-            
-        return True
+            report['dimension_matches'] = False
+
+        is_valid = not report['has_nan_or_inf'] and report['dimension_matches']
+        return is_valid, report
         
     def _apply_clustering_constraint(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
         """Apply clustering constraints before SMOTE."""
@@ -281,7 +359,9 @@ class ConstrainedSMOTE:
         unique_labels, counts = np.unique(labels, return_counts=True)
         insufficient_classes = unique_labels[counts < self.min_samples_per_class]
         if len(insufficient_classes) > 0:
-            logger.warning(f"Classes {insufficient_classes} have fewer than {self.min_samples_per_class} samples")
+            raise ValueError(
+                f"Classes {insufficient_classes.tolist()} have fewer than {self.min_samples_per_class} samples"
+            )
     
     def _apply_clustering_constraints(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
         """Apply clustering constraints to preserve semantic structure."""

@@ -39,7 +39,7 @@ class SynthesisPipeline:
             raise ValueError("Encoder and decoder embedding dimensions must match")
             
     def fit(self, images: torch.Tensor, labels: np.ndarray, 
-            train_decoder: bool = True, decoder_epochs: int = 50) -> None:
+            train_decoder: bool = True, decoder_epochs: int = 5) -> None:
         """
         Fit the pipeline on training data.
         
@@ -59,7 +59,7 @@ class SynthesisPipeline:
         # Train decoder if requested
         if train_decoder:
             from .decoders.autoencoder_trainer import AutoencoderTrainer
-            trainer = AutoencoderTrainer(self.decoder, learning_rate=0.001)
+            trainer = AutoencoderTrainer(self.decoder, learning_rate=0.001, use_perceptual_loss=False)
             trainer.train(embeddings, images, num_epochs=decoder_epochs, batch_size=16)
             self.decoder._is_trained = True
         
@@ -101,7 +101,12 @@ class SynthesisPipeline:
         Returns:
             Quality metrics dictionary
         """
-        return self.quality_assessor.evaluate_quality(synthetic_images, real_images)
+        quality_results = self.quality_assessor.evaluate_quality(synthetic_images, real_images)
+        # Backward-compatible flattening for callers expecting top-level metrics
+        if isinstance(quality_results, dict) and 'metrics' in quality_results and isinstance(quality_results['metrics'], dict):
+            flattened = {**quality_results, **quality_results['metrics']}
+            return flattened
+        return quality_results
         
     def save_pipeline(self, base_path: str) -> None:
         """Save the entire pipeline."""
