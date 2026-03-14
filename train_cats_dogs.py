@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision.transforms as transforms
-from torchvision.datasets import CIFAR10
+from torchvision.datasets import CIFAR10, STL10
 
 # Suppress torchvision's pretrained= deprecation warnings from existing code
 warnings.filterwarnings('ignore', category=UserWarning, module='torchvision')
@@ -47,9 +47,13 @@ logging.basicConfig(
 logger = logging.getLogger('train_cats_dogs')
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-IMAGE_SIZE   = 64          # upsampled from CIFAR-10 32x32
-CIFAR_CAT    = 3           # CIFAR-10 label index for "cat"
-CIFAR_DOG    = 5           # CIFAR-10 label index for "dog"
+IMAGE_SIZE   = 32   # native CIFAR-10 resolution — no blur from upscaling
+# STL-10 class indices for cats/dogs
+STL_CAT      = 3
+STL_DOG      = 5
+# CIFAR-10 fallback
+CIFAR_CAT    = 3
+CIFAR_DOG    = 5
 CLASS_NAMES  = {0: 'cat', 1: 'dog'}
 OUTPUT_DIR   = Path('synthetic_output')
 DATA_DIR     = Path('data')
@@ -58,33 +62,34 @@ DATA_DIR     = Path('data')
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 def load_cats_and_dogs(n_per_class: int) -> tuple:
-    """Download CIFAR-10 and return a balanced cat/dog tensor + label array."""
-    logger.info("Loading CIFAR-10 (downloading if needed)...")
+    """Load STL-10 cats & dogs (native 96×96, downscaled to IMAGE_SIZE).
+    Falls back to CIFAR-10 if STL-10 download fails."""
+    # No Resize needed — CIFAR-10 is natively IMAGE_SIZE×IMAGE_SIZE
     transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),  # → [-1, 1]
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
-    dataset = CIFAR10(root=str(DATA_DIR), train=True, download=True, transform=transform)
+    logger.info("Loading CIFAR-10 (train+test splits, native 32×32)...")
+    train_ds = CIFAR10(root=str(DATA_DIR), train=True,  download=True, transform=transform)
+    test_ds  = CIFAR10(root=str(DATA_DIR), train=False, download=True, transform=transform)
+    cat_idx, dog_idx = CIFAR_CAT, CIFAR_DOG
 
     images_list, labels_list = [], []
     counts = {0: 0, 1: 0}
+    for dataset in (train_ds, test_ds):
+        for img, label in dataset:
+            if label == cat_idx and counts[0] < n_per_class:
+                images_list.append(img); labels_list.append(0); counts[0] += 1
+            elif label == dog_idx and counts[1] < n_per_class:
+                images_list.append(img); labels_list.append(1); counts[1] += 1
+            if counts[0] >= n_per_class and counts[1] >= n_per_class:
+                break
 
-    for img, cifar_label in dataset:
-        if cifar_label == CIFAR_CAT and counts[0] < n_per_class:
-            images_list.append(img)
-            labels_list.append(0)
-            counts[0] += 1
-        elif cifar_label == CIFAR_DOG and counts[1] < n_per_class:
-            images_list.append(img)
-            labels_list.append(1)
-            counts[1] += 1
-        if counts[0] >= n_per_class and counts[1] >= n_per_class:
-            break
-
-    images = torch.stack(images_list)        # [2*n, 3, 32, 32]
-    labels = np.array(labels_list)            # [2*n]
-    logger.info(f"  {counts[0]} cats + {counts[1]} dogs = {len(images)} images")
+    images = torch.stack(images_list)
+    labels = np.array(labels_list)
+    logger.info(f"  {counts[0]} cats + {counts[1]} dogs = {len(images)} images @ {IMAGE_SIZE}×{IMAGE_SIZE}")
     return images, labels
 
 
@@ -150,8 +155,8 @@ def parse_args():
                    help='Training images per class (default: 300)')
     p.add_argument('--epochs', type=int, default=150,
                    help='E2E training epochs (default: 150)')
-    p.add_argument('--image-size', type=int, default=64,
-                   help='Image size to resize CIFAR to (default: 64)')
+    p.add_argument('--image-size', type=int, default=IMAGE_SIZE,
+                   help=f'Image size (default: {IMAGE_SIZE})')
     p.add_argument('--n-synthetic', type=int, default=50,
                    help='Synthetic images to generate (default: 50)')
     p.add_argument('--embedding-dim', type=int, default=512,
@@ -188,7 +193,7 @@ def main():
     decoder = DCGANDecoder(
         embedding_dim=args.embedding_dim,
         image_shape=(3, IMAGE_SIZE, IMAGE_SIZE),
-        base_channels=256,
+        base_channels=512,   # 7M params → sharper details
         device=device,
     )
 

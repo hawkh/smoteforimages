@@ -175,10 +175,11 @@ class TestIntegration(unittest.TestCase):
     
     def test_constrained_smote_basic(self):
         """Test basic ConstrainedSMOTE functionality."""
-        # Create test data with sufficient samples
-        n_samples = 20
-        embeddings = np.random.randn(n_samples, self.embedding_dim)
-        labels = np.random.randint(0, self.n_classes, n_samples)
+        # Create imbalanced data so SMOTE actually generates synthetic samples
+        # Class 0: 10 samples (majority), Class 1: 5 samples, Class 2: 5 samples
+        counts = [10, 5, 5]
+        embeddings = np.random.randn(sum(counts), self.embedding_dim)
+        labels = np.concatenate([np.full(c, i) for i, c in enumerate(counts)])
         
         smote = ConstrainedSMOTE(
             k_neighbors=3,

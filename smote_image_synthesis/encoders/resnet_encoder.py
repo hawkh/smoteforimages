@@ -282,7 +282,13 @@ class ResNetEncoder(ImageEncoder):
         history = {'loss': [], 'accuracy': []}
         
         self.model.train()
-        
+
+        # Determine num_classes by scanning all labels before training starts
+        if not hasattr(self, 'classifier'):
+            all_labels = torch.cat([lbls for _, lbls in dataloader])
+            num_classes = int(all_labels.max().item()) + 1
+            self.classifier = nn.Linear(self.embedding_dim, num_classes).to(self.device)
+
         for epoch in range(num_epochs):
             # Unfreeze backbone after specified epochs
             if epoch == unfreeze_after_epochs and self.freeze_backbone:
@@ -304,12 +310,6 @@ class ResNetEncoder(ImageEncoder):
                 
                 # Forward pass
                 embeddings = self.model(images)
-                
-                # For fine-tuning, we need a classification head
-                # This is a simplified version - in practice, you'd add a proper classifier
-                if not hasattr(self, 'classifier'):
-                    num_classes = len(torch.unique(labels))
-                    self.classifier = nn.Linear(self.embedding_dim, num_classes).to(self.device)
                 
                 logits = self.classifier(embeddings)
                 loss = criterion(logits, labels)

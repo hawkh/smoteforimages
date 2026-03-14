@@ -207,17 +207,30 @@ class QualityAssessor:
         return mse.item()
         
     def _compute_ssim(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
-        """Compute Structural Similarity Index (placeholder)."""
-        # Placeholder implementation - would use proper SSIM calculation
-        # For now, return inverse of MSE as approximation
-        mse = self._compute_mse(synthetic, real)
-        return 1.0 / (1.0 + mse)
+        """Compute Structural Similarity Index using scikit-image."""
+        from skimage.metrics import structural_similarity
+        syn_np = synthetic.detach().cpu().numpy()
+        real_np = real.detach().cpu().numpy()
+        scores = []
+        for s, r in zip(syn_np, real_np):
+            # skimage expects (H, W) or (H, W, C); transpose from (C, H, W)
+            s_img = np.transpose(s, (1, 2, 0))
+            r_img = np.transpose(r, (1, 2, 0))
+            channel_axis = 2 if s_img.ndim == 3 and s_img.shape[2] > 1 else None
+            score = structural_similarity(
+                s_img, r_img,
+                data_range=float(r_img.max() - r_img.min()),
+                channel_axis=channel_axis
+            )
+            scores.append(score)
+        return float(np.mean(scores))
         
     def _compute_lpips(self, synthetic: torch.Tensor, real: torch.Tensor) -> float:
         """Compute LPIPS (simplified implementation)."""
         # Simplified LPIPS using VGG features
         if not hasattr(self, 'vgg_model'):
-            self.vgg_model = models.vgg16(pretrained=True).features[:16].eval().to(self.device)
+            from torchvision.models import VGG16_Weights
+            self.vgg_model = models.vgg16(weights=VGG16_Weights.IMAGENET1K_V1).features[:16].eval().to(self.device)
         
         # Extract features
         with torch.no_grad():
@@ -310,8 +323,13 @@ class QualityAssessor:
         # Initialize Inception model for FID
         if 'fid' in self.metrics:
             try:
-                self.inception_model = models.inception_v3(pretrained=True, transform_input=False)
+                from torchvision.models import Inception_V3_Weights
+                self.inception_model = models.inception_v3(
+                    weights=Inception_V3_Weights.IMAGENET1K_V1,
+                    transform_input=False
+                )
                 self.inception_model.fc = nn.Identity()  # Remove final classification layer
+                self.inception_model.AuxLogits = None    # Disable aux branch to avoid tuple output
                 self.inception_model.eval()
                 self.inception_model.to(self.device)
                 logger.info("Initialized Inception model for FID computation")

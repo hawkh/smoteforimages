@@ -91,15 +91,17 @@ class VAEDecoder(BaseDecoder):
         """Generate default hidden dimensions."""
         c, h, w = self.image_shape
         target_size = c * h * w
-        
-        # Create progressive scaling
+
         hidden_dims = []
         current_dim = self.latent_dim
-        
+
         while current_dim < target_size // 4:
-            current_dim = min(current_dim * 2, 1024)
-            hidden_dims.append(current_dim)
-        
+            new_dim = min(current_dim * 2, 1024)
+            hidden_dims.append(new_dim)
+            if new_dim == current_dim:  # Capped — can't grow further; stop
+                break
+            current_dim = new_dim
+
         return hidden_dims
     
     def _build_model(self) -> nn.Module:

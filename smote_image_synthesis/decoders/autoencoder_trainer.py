@@ -485,9 +485,9 @@ class PerceptualLoss(nn.Module):
             # Fallback to MSE loss
             return self.mse_loss(pred, target)
         
-        # Ensure inputs are in the right range [0, 1] and format
-        pred = torch.clamp(pred, 0, 1)
-        target = torch.clamp(target, 0, 1)
+        # Ensure inputs are in [0, 1]; images may be in [-1, 1] (tanh output)
+        pred = (pred.clamp(-1, 1) + 1) / 2
+        target = (target.clamp(-1, 1) + 1) / 2
         
         # Handle grayscale images by repeating channels
         if pred.size(1) == 1:

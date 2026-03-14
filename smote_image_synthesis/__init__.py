@@ -8,14 +8,15 @@ __version__ = "0.1.0"
 __author__ = "SMOTE Image Synthesis Team"
 
 from .data.models import (
-    EmbeddingData, 
-    SyntheticSample, 
+    EmbeddingData,
+    SyntheticSample,
     PipelineConfig,
     EncoderConfig,
     SMOTEConfig,
     DecoderConfig,
     QualityConfig
 )
+from .pipeline import SynthesisPipeline
 
 __all__ = [
     "EmbeddingData",
@@ -24,5 +25,6 @@ __all__ = [
     "EncoderConfig",
     "SMOTEConfig",
     "DecoderConfig",
-    "QualityConfig"
+    "QualityConfig",
+    "SynthesisPipeline",
 ]

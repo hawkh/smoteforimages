@@ -81,11 +81,12 @@ class SynthesisPipeline:
             self.decoder._is_trained = True
 
     def _train_end_to_end(self, images: torch.Tensor, num_epochs: int,
-                          learning_rate: float = 3e-4, batch_size: int = 32) -> None:
+                          learning_rate: float = 2e-4, batch_size: int = 32) -> None:
         """
-        Train encoder and decoder jointly end-to-end for reconstruction.
-        This produces embeddings that carry pixel-level information the decoder
-        can actually use, avoiding the grey-blob failure mode.
+        Train encoder and decoder jointly end-to-end.
+        For DCGANDecoder: uses hybrid reconstruction + adversarial training.
+        Phase 1 (first 30% of epochs): reconstruction only (MSE+L1+perceptual)
+        Phase 2 (remaining 70%): adds GAN discriminator for sharpness.
         """
         import logging
         from torch.utils.data import DataLoader, TensorDataset
@@ -94,21 +95,22 @@ class SynthesisPipeline:
         _logger = logging.getLogger(__name__)
 
         device = self.encoder.device
+        use_gan = type(self.decoder).__name__ == 'DCGANDecoder'
 
         # Unfreeze ALL encoder params for joint training
         for param in self.encoder.model.parameters():
             param.requires_grad = True
 
-        all_params = (list(self.encoder.model.parameters()) +
+        gen_params = (list(self.encoder.model.parameters()) +
                       list(self.decoder.model.parameters()))
 
-        optimizer = optim.Adam(all_params, lr=learning_rate, weight_decay=1e-5)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=num_epochs, eta_min=1e-5)
+        opt_gen = optim.Adam(gen_params, lr=learning_rate, betas=(0.5, 0.999))
+        sched_gen = optim.lr_scheduler.CosineAnnealingLR(
+            opt_gen, T_max=num_epochs, eta_min=1e-5)
         criterion_mse = nn.MSELoss()
         criterion_l1 = nn.L1Loss()
 
-        # Try to load perceptual loss (VGG-based) for better color/texture
+        # Perceptual loss (VGG-based)
         try:
             from .decoders.autoencoder_trainer import PerceptualLoss
             perceptual_loss_fn = PerceptualLoss(device=device)
@@ -118,38 +120,134 @@ class SynthesisPipeline:
             use_perceptual = False
             _logger.info(f"  Perceptual loss: unavailable ({e}), using MSE+L1 only")
 
+        # Build discriminator if using GAN mode
+        disc = None
+        opt_disc = None
+        if use_gan:
+            disc = self._build_discriminator(self.decoder.image_shape, base_channels=64).to(device)
+            opt_disc = optim.Adam(disc.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+            _logger.info("  GAN discriminator: enabled (adversarial training)")
+
+        recon_epochs = max(1, int(num_epochs * 0.3))  # warmup reconstruction only
+        _logger.info(
+            f"E2E training: encoder+decoder jointly for {num_epochs} epochs "
+            f"({'GAN after epoch ' + str(recon_epochs) if use_gan else 'recon only'})"
+        )
+
         dataset = TensorDataset(images)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                            num_workers=0)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
         self.encoder.model.train()
         self.decoder.model.train()
-        _logger.info(f"E2E training: encoder+decoder jointly for {num_epochs} epochs")
+        if disc is not None:
+            disc.train()
+
+        n_critic = 2  # D steps per G step in GAN phase
 
         for epoch in range(num_epochs):
-            epoch_loss = 0.0
+            epoch_g_loss = 0.0
+            epoch_d_loss = 0.0
+            adv_active = use_gan and epoch >= recon_epochs
+
             for (batch_imgs,) in loader:
                 batch_imgs = batch_imgs.to(device)
-                optimizer.zero_grad()
-                embeddings = self.encoder.model(batch_imgs)
-                reconstructed = self.decoder.model(embeddings)
-                mse = criterion_mse(reconstructed, batch_imgs)
-                l1 = criterion_l1(reconstructed, batch_imgs)
-                loss = mse + 0.5 * l1
+                bs = batch_imgs.size(0)
+
+                # ── Discriminator steps (GAN phase only) ──────────────────────
+                if adv_active:
+                    for _ in range(n_critic):
+                        opt_disc.zero_grad()
+                        with torch.no_grad():
+                            emb_d = self.encoder.model(batch_imgs)
+                            fake = self.decoder.model(emb_d)
+                        # WGAN-GP: W-distance = E[D(real)] - E[D(fake)]
+                        d_real = disc(batch_imgs).mean()
+                        d_fake = disc(fake).mean()
+                        # Gradient penalty
+                        alpha = torch.rand(bs, 1, 1, 1, device=device)
+                        interp = (alpha * batch_imgs + (1 - alpha) * fake).requires_grad_(True)
+                        d_interp = disc(interp)
+                        grads = torch.autograd.grad(
+                            outputs=d_interp.sum(), inputs=interp,
+                            create_graph=True)[0]
+                        gp = ((grads.norm(2, dim=(1, 2, 3)) - 1) ** 2).mean()
+                        d_loss = -d_real + d_fake + 10.0 * gp
+                        d_loss.backward()
+                        opt_disc.step()
+                    epoch_d_loss += d_loss.item()
+
+                # ── Generator / encoder+decoder step ──────────────────────────
+                opt_gen.zero_grad()
+                emb = self.encoder.model(batch_imgs)
+                recon = self.decoder.model(emb)
+
+                mse = criterion_mse(recon, batch_imgs)
+                l1  = criterion_l1(recon, batch_imgs)
+                g_loss = mse + 0.5 * l1
                 if use_perceptual:
-                    loss = loss + 0.05 * perceptual_loss_fn(reconstructed, batch_imgs)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
-                optimizer.step()
-                epoch_loss += loss.item()
-            scheduler.step()
+                    g_loss = g_loss + 0.05 * perceptual_loss_fn(recon, batch_imgs)
+
+                if adv_active:
+                    # WGAN generator loss: maximise D(fake) = minimise -D(fake)
+                    g_adv = -disc(recon).mean()
+                    frac = (epoch - recon_epochs) / max(1, num_epochs - recon_epochs)
+                    lam_adv = 0.05 + 0.15 * frac  # 0.05 → 0.20
+                    g_loss = g_loss + lam_adv * g_adv
+
+                torch.nn.utils.clip_grad_norm_(gen_params, max_norm=1.0)
+                g_loss.backward()
+                opt_gen.step()
+                epoch_g_loss += g_loss.item()
+
+            sched_gen.step()
             if epoch % 10 == 0 or epoch == num_epochs - 1:
-                _logger.info(f"  E2E Epoch {epoch:>3}: loss={epoch_loss/len(loader):.4f}")
+                d_str = f"  D={epoch_d_loss/len(loader):.4f}" if adv_active else ""
+                _logger.info(
+                    f"  E2E Epoch {epoch:>3}: G={epoch_g_loss/len(loader):.4f}{d_str}"
+                )
 
         self.encoder.model.eval()
         self.decoder.model.eval()
+        if disc is not None:
+            disc.eval()
         self.decoder._is_trained = True
         _logger.info("E2E training complete")
+
+    @staticmethod
+    def _build_discriminator(image_shape: tuple, base_channels: int = 64):
+        """Build a WGAN-GP discriminator (no BN, no spectral norm — GP does the job)."""
+        import torch.nn as nn
+
+        c, h, _ = image_shape
+        layers = []
+        in_ch = c
+        out_ch = base_channels
+        cur = h
+        while cur > 4:
+            layers += [
+                nn.Conv2d(in_ch, out_ch, 4, 2, 1, bias=False),
+                nn.LeakyReLU(0.2, inplace=True),
+            ]
+            in_ch = out_ch
+            out_ch = min(out_ch * 2, 512)
+            cur //= 2
+        # Final conv → scalar critic score per image
+        layers.append(nn.Conv2d(in_ch, 1, 4, 1, 0, bias=True))
+
+        class Discriminator(nn.Module):
+            def __init__(self, layers):
+                super().__init__()
+                self.main = nn.Sequential(*layers)
+            def forward(self, x):
+                return self.main(x).view(x.size(0))
+
+        disc = Discriminator(layers)
+        for m in disc.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, 0.0, 0.02)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+        return disc
         
     def generate_synthetic_images(self, 
                                 n_samples: Optional[int] = None) -> Tuple[torch.Tensor, np.ndarray]:

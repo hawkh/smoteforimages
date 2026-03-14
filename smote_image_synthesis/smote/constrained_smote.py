@@ -162,50 +162,77 @@ class ConstrainedSMOTE:
     def generate_synthetic(self, n_samples: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Generate synthetic embeddings.
-        
+
         Args:
-            n_samples: Number of synthetic samples (uses SMOTE default if None)
-            
+            n_samples: Number of synthetic samples to generate. When specified,
+                       samples are distributed evenly across classes regardless
+                       of the original class balance.
+
         Returns:
             Tuple of (synthetic_embeddings, synthetic_labels)
         """
         if not self.is_fitted:
             raise ValueError("SMOTE must be fitted before generating samples")
-            
-        X_resampled, y_resampled = self.smote.fit_resample(self.embeddings, self.labels)
-        
-        # Extract only the synthetic samples
+
+        if n_samples is not None and n_samples > 0:
+            # Build per-class target counts so we always produce n_samples total
+            unique_labels, counts = np.unique(self.labels, return_counts=True)
+            n_classes = len(unique_labels)
+            per_class_extra = max(1, n_samples // n_classes)
+            target = {int(lbl): int(cnt) + per_class_extra
+                      for lbl, cnt in zip(unique_labels, counts)}
+            temp_smote = SMOTE(
+                k_neighbors=self.k_neighbors,
+                sampling_strategy=target,
+                random_state=self.random_state
+            )
+            X_resampled, y_resampled = temp_smote.fit_resample(self.embeddings, self.labels)
+        else:
+            X_resampled, y_resampled = self.smote.fit_resample(self.embeddings, self.labels)
+
+        # Extract only the newly created synthetic samples
         n_original = len(self.embeddings)
         synthetic_embeddings = X_resampled[n_original:]
         synthetic_labels = y_resampled[n_original:]
-        
+
         # Apply validation constraints
         if self.max_distance_threshold is not None:
             synthetic_embeddings, synthetic_labels = self._filter_by_distance(
                 synthetic_embeddings, synthetic_labels
             )
-            
+
         return synthetic_embeddings, synthetic_labels
         
-    def validate_embedding_space(self, embeddings: np.ndarray) -> bool:
+    def validate_embedding_space(self, embeddings: np.ndarray) -> Tuple[bool, Dict[str, Any]]:
         """
         Validate if embeddings are in valid space.
-        
+
         Args:
             embeddings: Embeddings to validate
-            
+
         Returns:
-            True if valid, False otherwise
+            Tuple of (is_valid, report_dict)
         """
+        report: Dict[str, Any] = {
+            'n_samples': len(embeddings),
+            'n_features': embeddings.shape[1] if embeddings.ndim == 2 else None,
+        }
+
         # Check for NaN or infinity
         if np.any(np.isnan(embeddings)) or np.any(np.isinf(embeddings)):
-            return False
-            
+            report['error'] = 'NaN or infinite values detected'
+            return False, report
+
         # Check dimensionality
-        if embeddings.shape[1] != self.embeddings.shape[1]:
-            return False
-            
-        return True
+        if self.embeddings is not None and embeddings.shape[1] != self.embeddings.shape[1]:
+            report['error'] = (
+                f'Dimension mismatch: expected {self.embeddings.shape[1]}, '
+                f'got {embeddings.shape[1]}'
+            )
+            return False, report
+
+        report['status'] = 'valid'
+        return True, report
         
     def _apply_clustering_constraint(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
         """Apply clustering constraints before SMOTE."""
@@ -282,6 +309,14 @@ class ConstrainedSMOTE:
         insufficient_classes = unique_labels[counts < self.min_samples_per_class]
         if len(insufficient_classes) > 0:
             logger.warning(f"Classes {insufficient_classes} have fewer than {self.min_samples_per_class} samples")
+
+        # Check that each class has enough samples for k_neighbors
+        min_count = int(np.min(counts))
+        if min_count <= self.k_neighbors:
+            raise ValueError(
+                f"Insufficient samples for k_neighbors={self.k_neighbors}. "
+                f"Minimum samples per class is {min_count}, need at least {self.k_neighbors + 1}."
+            )
     
     def _apply_clustering_constraints(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
         """Apply clustering constraints to preserve semantic structure."""
