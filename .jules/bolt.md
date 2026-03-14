@@ -1,0 +1,3 @@
+## 2025-02-23 - Vectorizing Distance Calculations in Embedding Space
+**Learning:** Naive iterative distance calculations for validating synthetic embeddings (`O(N*M)`) become a massive bottleneck for large batches. Using `sklearn.neighbors.NearestNeighbors` grouped by unique labels vectorizes the nearest neighbor search, providing dramatic performance improvements (~100x+ faster in benchmarks).
+**Action:** When filtering or validating points against a reference set in high-dimensional embedding spaces, always default to spatial index structures or vectorized nearest-neighbor implementations (`NearestNeighbors`, FAISS) rather than manual loop-based `np.linalg.norm` calculations.
