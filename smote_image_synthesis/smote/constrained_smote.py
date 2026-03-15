@@ -257,28 +257,51 @@ class ConstrainedSMOTE:
     def _filter_by_distance(self, 
                           synthetic_embeddings: np.ndarray, 
                           synthetic_labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
-        if self.max_distance_threshold is None:
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized to use NearestNeighbors for O(log N) queries per class
+        instead of O(N) iterative distance computations.
+        """
+        if self.max_distance_threshold is None or len(synthetic_embeddings) == 0:
             return synthetic_embeddings, synthetic_labels
             
         valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
         
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            # Find nearest neighbors in original embeddings of same class
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        for label in unique_labels:
+            # Find original embeddings of the same class
+            orig_mask = self.labels == label
+            orig_label_embeddings = self.embeddings[orig_mask]
+
+            # Find synthetic embeddings of the same class
+            synth_mask = synthetic_labels == label
+            synth_indices = np.where(synth_mask)[0]
+            synth_label_embeddings = synthetic_embeddings[synth_indices]
             
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                min_distance = np.min(distances)
+            if len(orig_label_embeddings) > 0 and len(synth_label_embeddings) > 0:
+                # Use NearestNeighbors for fast distance computation
+                nn = NearestNeighbors(n_neighbors=1, algorithm='auto')
+                nn.fit(orig_label_embeddings)
                 
-                if min_distance <= self.max_distance_threshold:
-                    valid_indices.append(i)
-                    
+                # Query nearest neighbor for all synthetic samples of this class at once
+                distances, _ = nn.kneighbors(synth_label_embeddings)
+                distances = distances.flatten()
+
+                # Keep indices where distance is within threshold
+                valid_mask = distances <= self.max_distance_threshold
+                valid_indices.extend(synth_indices[valid_mask])
+
+        # Sort valid indices to maintain original ordering (optional)
+        valid_indices = sorted(valid_indices)
+
         if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
+            return (synthetic_embeddings[valid_indices],
+                    synthetic_labels[valid_indices])
         else:
-            return np.array([]), np.array([])
+            empty_emb = np.empty((0, synthetic_embeddings.shape[1]),
+                                 dtype=synthetic_embeddings.dtype)
+            empty_lbl = np.empty(0, dtype=synthetic_labels.dtype)
+            return empty_emb, empty_lbl
     
     def _validate_input_data(self, embeddings: np.ndarray, labels: np.ndarray) -> None:
         """Validate input data format and consistency."""

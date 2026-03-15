@@ -1,0 +1,3 @@
+## 2024-02-04 - Optimize `_filter_by_distance` with `NearestNeighbors`
+**Learning:** In the embedding distance filtering step of `ConstrainedSMOTE`, iterating over every synthetic sample and manually computing the Euclidean distance to every original sample of the same class (`np.linalg.norm()`) results in $O(M \times N \times D)$ complexity, which scales poorly for large datasets and embedding dimensions.
+**Action:** Replace iterative norm computation with scikit-learn's `NearestNeighbors(n_neighbors=1)`. Grouping points by class and performing batched queries provides a massive speedup by reducing time complexity to $O(\log N)$ per query.
