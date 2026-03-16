@@ -29,8 +29,15 @@ synthetic_output/
 # Data directories
 data/
 
-# Documentation generated files
-docs/patent/
+# Documentation generated files (keep LaTeX source, ignore build artifacts)
+docs/patent/*.log
+docs/patent/*.aux
+docs/patent/*.bbl
+docs/patent/*.blg
+docs/patent/*.out
+docs/patent/*.fls
+docs/patent/*.fdb_latexmk
+docs/patent/*.synctex.gz
 
 # Claude settings
 .claude/
