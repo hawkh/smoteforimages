@@ -1,0 +1,1968 @@
+% ─────────────────────────────────────────────────────────────────────────────
+%  UTILITY PATENT APPLICATION
+%  Title: System and Method for Class-Conditional Synthetic Image Generation
+%         via Spherical Linear Interpolation in a Jointly Trained Adversarial
+%         Embedding Space
+%  Filing basis: 35 U.S.C. § 111(a); 37 C.F.R. § 1.52
+% ─────────────────────────────────────────────────────────────────────────────
+
+\documentclass[12pt,letterpaper]{article}
+
+\usepackage[top=1in,bottom=1in,left=1in,right=1in]{geometry}
+\usepackage{setspace}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{algorithm,algpseudocode}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,
+                decorations.pathreplacing,backgrounds,calc,matrix}
+\usepackage{booktabs,multirow,array,tabularx,longtable}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption,subcaption}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{float}
+\usepackage{bm}
+\usepackage{bbm}
+\usepackage{parskip}
+\usepackage{indentfirst}
+
+%% Line spacing per USPTO Rule 1.52(b)(2): 1.5 or double
+\doublespacing
+\setlength{\parindent}{0.5in}
+\setlength{\parskip}{0pt plus 1pt}
+
+%% Section style
+\titleformat{\section}[block]
+  {\normalfont\bfseries\large\centering}
+  {}{0em}{\MakeUppercase}
+\titleformat{\subsection}[block]
+  {\normalfont\bfseries}
+  {\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}[block]
+  {\normalfont\bfseries\itshape}
+  {\thesubsubsection}{0.5em}{}
+\setcounter{secnumdepth}{3}
+
+%% Convenience macros
+\newcommand{\bz}{\mathbf{z}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\by}{\mathbf{y}}
+\newcommand{\bw}{\mathbf{w}}
+\newcommand{\bc}{\mathbf{c}}
+\newcommand{\btheta}{\bm{\theta}}
+\newcommand{\bphi}{\bm{\phi}}
+\newcommand{\RR}{\mathbb{R}}
+\newcommand{\EE}{\mathbb{E}}
+\newcommand{\NN}{\mathcal{N}}
+
+%% Claims environment
+\newcounter{claimnum}
+\newenvironment{claims}{%
+  \setcounter{claimnum}{0}
+  \begin{list}{\arabic{claimnum}.}{%
+    \usecounter{claimnum}
+    \setlength{\leftmargin}{2em}
+    \setlength{\labelsep}{0.5em}
+    \setlength{\itemsep}{0pt}
+    \setlength{\parsep}{6pt plus 2pt}
+  }%
+}{\end{list}}
+
+%% Header/footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Attorney Docket No.:\ [DOCKET]}
+\fancyhead[R]{\small PATENT APPLICATION}
+\fancyfoot[C]{\thepage}
+\setlength{\headheight}{14pt}
+
+\hypersetup{colorlinks=false,hidelinks}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{document}
+% ─────────────────────────────────────────────────────────────────────────────
+
+% ══════════════════════════════════════════════════════════════════════════════
+%  TITLE PAGE
+% ══════════════════════════════════════════════════════════════════════════════
+\begin{titlepage}
+\centering
+\vspace*{1in}
+
+{\Large\bfseries UNITED STATES PATENT APPLICATION}
+
+\vspace{0.4in}
+
+\begin{tabular}{ll}
+\textbf{Title:}      & System and Method for Class-Conditional \\
+                     & Synthetic Image Generation via Spherical \\
+                     & Linear Interpolation in a Jointly Trained \\
+                     & Adversarial Embedding Space \\[6pt]
+\textbf{Inventor:}   & [INVENTOR NAME], [CITY, STATE, COUNTRY] \\[6pt]
+\textbf{Filing Type:} & Utility Patent Application \\[6pt]
+\textbf{Filing Basis:} & 35 U.S.C.\ \S 111(a) \\[6pt]
+\textbf{Attorney Docket:} & [DOCKET NUMBER] \\[6pt]
+\textbf{Correspondence Address:} & [LAW FIRM NAME] \\
+                     & [STREET ADDRESS] \\
+                     & [CITY, STATE, ZIP] \\
+\end{tabular}
+
+\vspace{0.5in}
+
+\textit{This application claims the benefit of U.S.\ Provisional Application
+No.\ [PROVISIONAL NUMBER], filed [DATE], which is incorporated herein by
+reference in its entirety.}
+
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{CROSS-REFERENCE TO RELATED APPLICATIONS}
+% ══════════════════════════════════════════════════════════════════════════════
+
+This application claims priority to U.S.\ Provisional Patent Application
+No.\ [PROVISIONAL APPLICATION NUMBER], filed on [FILING DATE], entitled
+``System and Method for Class-Conditional Synthetic Image Generation via
+Spherical Linear Interpolation in a Jointly Trained Adversarial Embedding
+Space,'' the disclosure of which is incorporated herein by reference in its
+entirety.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{STATEMENT REGARDING FEDERALLY SPONSORED RESEARCH}
+% ══════════════════════════════════════════════════════════════════════════════
+
+Not applicable.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{FIELD OF THE INVENTION}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The present invention relates generally to the field of machine learning and
+computer vision, and more particularly to systems and methods for generating
+synthetic training images to address class imbalance in image datasets through
+the combination of spherical linear interpolation in a learned embedding space
+and class-conditional adversarial image decoding.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{BACKGROUND OF THE INVENTION}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\subsection{Class Imbalance in Machine Learning}
+
+The problem of class imbalance is one of the most pervasive and consequential
+challenges encountered in applied machine learning. Class imbalance arises when
+the number of training examples belonging to different categories differs by a
+substantial factor, often by one or more orders of magnitude. In supervised
+classification tasks applied to image data, this imbalance manifests directly
+in model performance: classifiers trained on imbalanced corpora exhibit
+systematic bias toward majority classes, achieving inflated aggregate accuracy
+while producing unacceptable recall on underrepresented categories. This
+failure mode has real consequences across medical imaging, where rare pathology
+classes are frequently underrepresented; in autonomous driving, where uncommon
+road events must nonetheless be recognized reliably; and in industrial quality
+control, where defect classes are inherently rare relative to conforming
+products.
+
+The conventional approaches to addressing class imbalance fall into two broad
+families: sampling-based methods and cost-sensitive learning methods. Cost-
+sensitive approaches modify the training objective to penalize misclassification
+of minority examples more heavily than majority examples, but they do not alter
+the fundamental information content available to the learner and therefore
+provide only modest improvement when the minority class is severely
+underrepresented. Sampling-based methods, by contrast, directly alter the
+composition of the training corpus, either by removing majority-class examples
+through undersampling or by replicating or synthesizing minority-class examples
+through oversampling. Of these, synthetic oversampling is generally preferred
+for image data because it avoids the information loss inherent in undersampling
+while introducing new training examples that can improve the generalization
+surface of the learned classifier.
+
+\subsection{Limitations of Prior Interpolation-Based Oversampling}
+
+The Synthetic Minority Over-sampling Technique (SMOTE), introduced by Chawla
+and colleagues~\cite{chawla2002}, was a foundational advance in synthetic
+oversampling. In its original form, SMOTE operates directly on the raw feature
+vectors of minority-class examples, selecting a minority-class instance and one
+of its $k$ nearest neighbors within the same class, then synthesizing a new
+example at a random position along the linear segment connecting them in the
+original feature space. Formally, for two minority examples $\bx_i$ and
+$\bx_j$, SMOTE generates a synthetic example as $\bx_{\text{syn}} = \bx_i +
+\lambda(\bx_j - \bx_i)$ where $\lambda$ is drawn uniformly from $[0,1]$.
+
+When SMOTE was originally proposed, application to raw feature vectors of
+tabular or low-dimensional data was natural and well-motivated. However, the
+application of linear interpolation to image data presents a fundamental
+geometric problem that has not been adequately addressed in the prior art. The
+space of natural images is not a convex subset of the raw pixel space; rather,
+natural images occupy a curved, low-dimensional manifold embedded in a very
+high-dimensional ambient pixel space. Linear interpolation between two points
+on a curved manifold does not in general remain on the manifold; the resulting
+intermediate points may correspond to blurry, physically implausible pixel
+arrays that bear no resemblance to any real image. This manifold-departure
+problem is particularly severe for image data, where the valid image manifold
+is highly nonlinear and where even small deviations from the manifold produce
+perceptually unacceptable artifacts.
+
+The inventor has discovered that this limitation is not merely cosmetic but
+causes direct degradation in downstream classifier performance. When
+interpolated images depart from the valid image manifold, they carry misleading
+statistical information about the minority class distribution, and classifiers
+trained on such data learn spurious features that do not generalize to test
+examples drawn from the true minority distribution. Prior attempts to apply
+SMOTE to images in the raw pixel space or in the feature spaces of pre-trained
+classifiers have not adequately resolved this fundamental geometric limitation.
+
+\subsection{Limitations of Prior Generative Oversampling Approaches}
+
+An alternative line of prior art employs generative models, particularly
+Generative Adversarial Networks (GANs)~\cite{goodfellow2014}, to synthesize
+minority-class images directly. Under this paradigm, a GAN is trained on
+available minority-class examples and then used to generate additional images
+that are decoded from random latent vectors. While this approach sidesteps the
+manifold-departure problem of direct interpolation, it introduces a distinct
+set of limitations.
+
+First, generative approaches that sample from a learned prior distribution do
+not provide the structured interpolation property that gives SMOTE its primary
+advantage for class-balancing purposes: the ability to fill gaps in the
+minority-class sample density in a principled and controlled manner. A GAN
+sampling from a broad prior distribution may repeatedly generate examples from
+already-well-represented regions of the minority class manifold while failing
+to generate examples that fill the specific gaps in the training corpus where
+class density is lowest.
+
+Second, GANs trained in isolation on small minority-class corpora frequently
+exhibit mode collapse, generating a limited variety of outputs that fail to
+capture the full diversity of the minority class distribution. This limitation
+is especially acute when the available minority-class training data is small,
+which is precisely the regime in which class-balancing is most urgently needed.
+
+Third, prior generative oversampling methods have not established a rigorous
+coupling between the interpolation operation in the latent space and the
+geometric properties of that space. When the latent space does not have a
+well-defined metric structure, interpolation in that space produces results
+whose relationship to the true minority-class distribution is unpredictable.
+The inventor has observed that this lack of geometric grounding is a root cause
+of the unreliability of prior generative oversampling approaches.
+
+\subsection{Absence of Class Conditioning in Prior Decoder Architectures}
+
+A further limitation of prior art approaches to synthetic image generation for
+class-balancing is the failure to exploit class identity information within the
+generative decoder. In a class-imbalanced dataset, examples belonging to
+different classes may occupy well-separated regions of the embedding space.
+When a decoder is trained without awareness of which class its input embeddings
+belong to, it must learn a single shared generative mapping that spans multiple
+class-conditioned distributions. This is particularly problematic when the
+decoder architecture employs batch normalization, which computes feature
+statistics over batches that may span multiple classes.
+
+The inventor has found that decoding quality degrades substantially when the
+decoder is class-unaware, particularly in the fine-grained visual details that
+distinguish between similar classes. Class-conditional information, when
+properly incorporated, provides the decoder with direct guidance about which
+region of the output distribution it should target, enabling more precise and
+class-faithful synthetic image generation. Prior art architectures operating on
+image embedding spaces have either ignored class-conditional information
+entirely or incorporated it through architectural choices that do not provide
+sufficient capacity for the decoder to exploit it effectively.
+
+\subsection{Training Instability and Parameter Trajectory Problems}
+
+The training of adversarial image generation systems is well-known to be
+unstable, and this instability is particularly pronounced when training is
+conducted on the small datasets characteristic of minority-class oversampling
+scenarios. The standard GAN training objective involves a minimax game between
+a generator and a discriminator, and this game does not have a guaranteed
+convergence path for finite-capacity networks trained on finite data. The
+resulting training trajectories frequently exhibit mode collapse, oscillation,
+and catastrophic forgetting.
+
+One specific manifestation of this instability that has received insufficient
+attention in the prior art concerns the temporal trajectory of decoder
+parameters during training. It is well established in the optimization
+literature that parameter trajectories during stochastic gradient descent
+exhibit substantial high-frequency oscillation, and that the time-average of
+parameters along such trajectories frequently generalizes better than any
+individual point on the trajectory. This property, which underlies classical
+methods such as Polyak averaging, is especially important for generative models
+where individual training checkpoints may correspond to locally degenerate
+solutions. Prior art generative oversampling systems have failed to incorporate
+principled parameter averaging schemes, instead using the final training
+checkpoint regardless of the quality of its generative outputs relative to
+other points along the training trajectory.
+
+\subsection{Lack of Universal Dataset Interface}
+
+A practical limitation that has significantly hindered the adoption of prior
+art approaches to synthetic image oversampling is the absence of a universal
+dataset interface. Most prior art systems require dataset-specific preprocessing
+pipelines, class-label enumeration, and image loading code that must be
+rewritten for each new application. This requirement creates substantial
+engineering overhead, increases the likelihood of data-handling bugs, and
+prevents straightforward comparison of results across datasets. The inventor
+has recognized that the lack of a universal, convention-based dataset interface
+is a significant barrier to practical deployment of synthetic oversampling
+systems and has designed the present invention to address this limitation
+directly through a convention-over-configuration dataset loading strategy that
+requires no dataset-specific code.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{SUMMARY OF THE INVENTION}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The present invention provides a system and method for generating high-quality,
+class-faithful synthetic images for the purpose of addressing class imbalance
+in image datasets. The invention addresses the foregoing limitations of the
+prior art through a combination of novel architectural and training innovations.
+
+In a first aspect, the invention provides a computer-implemented method
+comprising: encoding images from an imbalanced training dataset to unit-norm
+embedding vectors on a high-dimensional unit hypersphere using a convolutional
+neural network augmented with an L2 normalization head; identifying, for each
+minority-class embedding vector, a set of nearest-neighbor embedding vectors
+within the same class using an angular distance metric; synthesizing new
+embedding vectors by spherical linear interpolation (SLERP) along geodesic arcs
+connecting selected pairs of same-class embedding vectors, such that the
+synthesized embeddings remain precisely on the unit hypersphere; decoding the
+synthesized embedding vectors to synthetic images using a class-conditional
+convolutional decoder that concatenates a learned class embedding vector to the
+image embedding vector at the decoder input; and training the encoder and
+decoder jointly using a phased schedule comprising a reconstruction-only phase
+followed by a Wasserstein GAN training phase with gradient penalty and feature
+matching regularization.
+
+In a second aspect, the invention provides a system comprising: a convolutional
+encoder with an L2 normalization head that maps images to embeddings on
+$\mathbb{S}^{D-1}$; a SLERP oversampling module that generates synthetic
+embeddings along class-homogeneous geodesic arcs; a class-conditional DCGAN
+decoder with incorporated non-local self-attention and concatenated class
+embedding; a WGAN-GP discriminator providing gradient-penalized adversarial
+training with intermediate-feature extraction for feature matching loss; an
+exponential moving average (EMA) shadow parameter manager; and a universal
+dataset interface that ingests any folder-structured image dataset.
+
+In a third aspect, the invention provides a non-transitory computer-readable
+medium storing instructions that, when executed, cause a processor to perform
+the steps of the method described in the first aspect.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{BRIEF DESCRIPTION OF THE DRAWINGS}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The accompanying drawings, which are incorporated herein and constitute a part
+of the specification, illustrate embodiments of the invention and, together
+with the description, serve to explain the principles of the invention.
+
+\textbf{FIG.\ 1} is a high-level block diagram of the complete system
+architecture showing the encoder, SLERP oversampling module, class-conditional
+decoder, discriminator, and EMA manager.
+
+\textbf{FIG.\ 2} is a diagram illustrating the geometric relationship between
+linear interpolation (LERP) and spherical linear interpolation (SLERP) on the
+unit hypersphere $\mathbb{S}^{D-1}$, showing the departure of linear
+interpolation from the hypersphere surface.
+
+\textbf{FIG.\ 3} is a detailed architectural diagram of the ResNet encoder
+with the L2 normalization head.
+
+\textbf{FIG.\ 4} is a diagram showing the SLERP oversampling procedure,
+illustrating the $k$-nearest-neighbor selection and interpolation along a
+class-homogeneous geodesic arc.
+
+\textbf{FIG.\ 5} is a detailed architectural diagram of the class-conditional
+DCGAN decoder showing the class embedding concatenation, transposed
+convolutional layers, and non-local self-attention block placement.
+
+\textbf{FIG.\ 6} is a diagram of the non-local self-attention block used in
+the decoder, showing the query, key, and value projections and the attention
+weight computation.
+
+\textbf{FIG.\ 7} is a detailed architectural diagram of the WGAN-GP
+discriminator showing the strided convolutional layers and the intermediate
+feature extraction pathway for feature matching.
+
+\textbf{FIG.\ 8} is a timeline diagram of the phased training schedule,
+showing the reconstruction-only phase and the adversarial training phase with
+corresponding loss terms active in each phase.
+
+\textbf{FIG.\ 9} is a diagram of the EMA shadow parameter manager, showing
+the parameter accumulation process during training and the permanent weight
+substitution at training completion.
+
+\textbf{FIG.\ 10} is a diagram of the universal dataset interface, showing
+the folder-structure convention and the resulting class-labeled batch sampling
+procedure.
+
+\textbf{FIG.\ 11} is a graph comparing Fr\'{e}chet Inception Distance (FID)
+scores of the disclosed method against prior art approaches, showing
+improvements from each component.
+
+\textbf{FIG.\ 12} is a flow diagram of the complete synthetic image generation
+procedure following training completion.
+
+\textbf{FIG.\ 13} is a diagram illustrating the cosine annealing learning rate
+schedule, including the handling of schedule state during the phase transition
+at epoch $0.3 \times T$.
+
+\textbf{FIG.\ 14} is a diagram showing the architecture of the optional VGG-16
+perceptual loss module and the feature layers used for perceptual similarity
+computation.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{DETAILED DESCRIPTION OF THE PREFERRED EMBODIMENTS}
+% ══════════════════════════════════════════════════════════════════════════════
+
+The following detailed description is set forth to assist in understanding the
+invention and is not intended to limit the scope of the invention, which is
+defined by the claims appended hereto. In the following description, like
+reference numbers indicate like elements. As used herein, the term
+``comprising'' means including but not limited to; ``consisting essentially of''
+limits the claimed composition or method to the specified materials or steps
+while permitting the inclusion of materials or steps that do not materially
+affect the basic and novel characteristics of the claimed invention.
+
+It will be appreciated by those skilled in the art that various modifications
+and changes can be made to the embodiments described below without departing
+from the broad scope of the invention. Some of these modifications and changes
+are described herein; others will be apparent to those skilled in the art in
+light of the following disclosure.
+
+\subsection{System Overview}
+
+In the preferred embodiment, the disclosed system comprises six principal
+components that cooperate to synthesize class-faithful images for addressing
+class imbalance in image datasets. These components are: a convolutional encoder
+with an L2 normalization head, a SLERP oversampling module, a class-conditional
+DCGAN decoder with non-local self-attention, a WGAN-GP discriminator, an EMA
+shadow parameter manager, and a universal dataset interface. The system is
+trained end-to-end in a phased schedule and, upon training completion, operates
+as a standalone image synthesis engine capable of generating any requested
+number of synthetic images for any class in the training dataset.
+
+Referring to FIG.\ 1, the system architecture operates as follows during
+training. An input image $\bx \in \RR^{H \times W \times C}$, where $H$ and
+$W$ denote spatial dimensions and $C$ denotes the number of channels, is
+provided to an encoder $E_{\bphi}$ parameterized by weights $\bphi$. The
+encoder maps the input image to a unit-norm embedding vector $\bz \in
+\mathbb{S}^{D-1} \subset \RR^D$, where $D$ denotes the embedding dimensionality
+and $\mathbb{S}^{D-1}$ denotes the $(D-1)$-dimensional unit hypersphere. The
+class label $y \in \{0, 1, \ldots, K-1\}$ associated with the input image,
+where $K$ denotes the total number of classes, is separately processed by a
+class embedding lookup $\bm{e}_y = \mathbf{E}_c[y] \in \RR^{d_c}$, where
+$\mathbf{E}_c \in \RR^{K \times d_c}$ is a learnable class embedding matrix
+and $d_c$ is the class embedding dimensionality.
+
+The unit-norm embedding $\bz$ and the class embedding $\bm{e}_y$ are
+concatenated to form the conditioning vector $\bc = [\bz; \bm{e}_y] \in
+\RR^{D + d_c}$, which is provided to a class-conditional DCGAN decoder
+$G_{\btheta}$ parameterized by weights $\btheta$. The decoder reconstructs the
+input image as $\hat{\bx} = G_{\btheta}(\bc)$. A WGAN-GP discriminator
+$D_{\bpsi}$ parameterized by weights $\bpsi$ receives either real images $\bx$
+or reconstructed images $\hat{\bx}$ and produces a real-valued critic score.
+During training, the adversarial loss, reconstruction loss, and feature matching
+loss are computed and used to update the parameters $\btheta$, $\bphi$, and
+$\bpsi$ according to the phased training schedule described herein. An EMA
+manager maintains shadow parameters $\tilde{\btheta}$ that track the
+time-averaged decoder weights throughout training.
+
+Upon completion of training, the SLERP oversampling module operates on the
+encoded representations of the training data. For each minority class $k$, the
+module constructs a set of synthesized embeddings $\{\hat{\bz}_i\}$ by applying
+the SLERP formula along geodesic arcs connecting selected pairs of same-class
+real embedding vectors. These synthesized embeddings, together with their
+associated class labels, are then passed through the EMA-weight decoder
+$G_{\tilde{\btheta}}$ to produce synthetic images. These synthetic images are
+added to the training corpus to address the class imbalance.
+
+\subsection{The Convolutional Encoder with L2 Normalization Head}
+
+\subsubsection{Encoder Architecture}
+
+In the preferred embodiment, the encoder $E_{\bphi}$ is built upon a
+ResNet-18 backbone~\cite{he2016} pretrained on ImageNet. The ResNet-18
+backbone comprises four residual block groups, each group consisting of two
+residual blocks with batch normalization and ReLU activations. The four groups
+operate on feature maps of spatial resolution $H/8 \times W/8$,
+$H/16 \times W/16$, $H/32 \times W/32$, and $H/64 \times W/64$ respectively,
+where $H$ and $W$ denote the input spatial dimensions. The number of feature
+channels in the four groups is 64, 128, 256, and 512, respectively.
+
+Following the final residual block group, a global average pooling layer reduces
+the spatial dimensions to produce a $512$-dimensional feature vector $\bh \in
+\RR^{512}$. This feature vector is passed through an L2 normalization head
+comprising a linear projection layer followed by an L2 normalization operation.
+Specifically, the linear projection is $\bp = \mathbf{W}_{\text{proj}}\,\bh +
+\bb_{\text{proj}}$, where $\mathbf{W}_{\text{proj}} \in \RR^{D \times 512}$ and
+$\bb_{\text{proj}} \in \RR^D$ are learnable parameters, and the embedding is
+obtained by L2 normalization:
+
+\begin{equation}
+  \bz = \frac{\bp}{\|\bp\|_2},
+  \label{eq:l2norm}
+\end{equation}
+
+\noindent where $\|\cdot\|_2$ denotes the Euclidean norm. The resulting
+embedding $\bz$ satisfies $\|\bz\|_2 = 1$ by construction, i.e., $\bz \in
+\mathbb{S}^{D-1}$.
+
+In the preferred embodiment, $D = 512$. In an alternative embodiment, $D$ may
+be set to any value in the range $[128, 1024]$ without departing from the scope
+of the invention. In yet another alternative embodiment, the encoder backbone
+may be replaced by a ResNet-50~\cite{he2016} architecture, which produces a
+$2048$-dimensional backbone feature vector prior to projection. The ResNet-50
+backbone provides greater representational capacity at the cost of increased
+computational expense and may be preferred when the training dataset is large
+and diverse.
+
+\subsubsection{Motivation for the L2 Normalization Head}
+
+The L2 normalization head serves a purpose beyond merely constraining the norm
+of the embedding vector. The inventor has recognized that unit-norm
+normalization induces a geometry on the embedding space that is precisely
+compatible with the spherical linear interpolation operation described
+hereinafter. When embeddings are constrained to lie on $\mathbb{S}^{D-1}$, the
+natural interpolation between two embeddings is the geodesic arc connecting
+them on the sphere, and the geodesic arc is precisely what SLERP traces. In the
+absence of the L2 normalization constraint, embeddings may have arbitrary norms,
+and the SLERP formula does not produce geometrically meaningful interpolants.
+
+Furthermore, the inventor has discovered that L2 normalization has a beneficial
+regularizing effect on encoder training, analogous to the effect observed in
+metric learning literature. By forcing the encoder to represent all input images
+as points on a fixed-radius hypersphere, the normalization prevents the encoder
+from using the magnitude of the embedding vector as an additional degree of
+freedom, effectively encouraging the encoder to allocate all representational
+capacity to the angular structure of the embedding space, which is precisely
+the structure that SLERP operates on.
+
+\subsubsection{Alternative Encoder Architectures}
+
+It will be appreciated by those skilled in the art that the ResNet backbone
+described above is not the sole architecture suitable for use as the encoder
+component. In one alternative embodiment, a Vision Transformer (ViT) backbone
+may be substituted for the ResNet backbone, with the class token output of the
+transformer serving as the input to the projection head. In another alternative
+embodiment, an EfficientNet backbone may be used, providing a favorable
+trade-off between accuracy and computational cost. In yet another alternative
+embodiment, the encoder may be trained from scratch rather than initialized
+from ImageNet pretrained weights, which may be preferred in applications where
+the input image domain is substantially different from the ImageNet domain.
+Regardless of the choice of backbone, the L2 normalization head described in
+Equation~(\ref{eq:l2norm}) is applied to the backbone output in all embodiments
+of the present invention.
+
+\subsection{Spherical Linear Interpolation for Manifold-Preserving Oversampling}
+
+\subsubsection{Geometric Motivation}
+
+The fundamental innovation of the oversampling component of the present
+invention is the replacement of the standard linear interpolation (LERP) used
+in prior art SMOTE implementations with spherical linear interpolation (SLERP).
+This replacement is geometrically motivated by the unit-norm constraint imposed
+by the L2 normalization head. When embeddings lie on the unit hypersphere
+$\mathbb{S}^{D-1}$, straight-line interpolation between two points on the
+sphere passes through the interior of the sphere rather than along the sphere
+surface, departing from the manifold on which the real data are constrained to
+lie. SLERP, by contrast, interpolates along the geodesic arc of $\mathbb{S}^{D-1}$
+connecting the two points, ensuring that all interpolated embeddings remain on
+the unit sphere.
+
+Referring to FIG.\ 2, the geometric distinction between LERP and SLERP is
+illustrated for the case of the two-dimensional unit circle (which generalizes
+naturally to the high-dimensional case). Given two unit-norm vectors $\bz_0$
+and $\bz_1$ on $\mathbb{S}^{D-1}$, the linear interpolant $\bz_{\text{lerp}}(t)
+= (1-t)\bz_0 + t\bz_1$ passes through the interior of the ball for $t \in
+(0,1)$, departing from the sphere. The SLERP interpolant $\bz_{\text{slerp}}(t)$
+remains on the sphere for all $t \in [0,1]$.
+
+\subsubsection{The SLERP Formula}
+
+The spherical linear interpolation formula is formally defined as follows.
+Let $\bz_0, \bz_1 \in \mathbb{S}^{D-1}$ be two unit-norm vectors, and let
+$\omega \in [0, \pi]$ denote the angle between them, computed as:
+
+\begin{equation}
+  \omega = \arccos\!\bigl(\bz_0 \cdot \bz_1\bigr),
+  \label{eq:omega}
+\end{equation}
+
+\noindent where $\bz_0 \cdot \bz_1$ denotes the inner product of $\bz_0$ and
+$\bz_1$. For a given interpolation parameter $t \in [0,1]$, the SLERP
+interpolant is:
+
+\begin{equation}
+  \hat{\bz}(t) = \frac{\sin\bigl((1-t)\,\omega\bigr)}{\sin\omega}\,\bz_0
+                + \frac{\sin\bigl(t\,\omega\bigr)}{\sin\omega}\,\bz_1.
+  \label{eq:slerp}
+\end{equation}
+
+\noindent It is straightforward to verify that $\|\hat{\bz}(t)\|_2 = 1$ for
+all $t \in [0,1]$, confirming that the SLERP interpolant remains on the unit
+hypersphere. Furthermore, the SLERP formula provides constant angular velocity
+along the geodesic arc, meaning that equal increments in the interpolation
+parameter $t$ correspond to equal angular displacements along the arc. This
+constant-velocity property is important for oversampling, as it ensures that
+the synthetic embeddings are uniformly distributed along the geodesic arc.
+
+\subsubsection{Numerical Stability for Nearly Collinear Vectors}
+
+In practice, the SLERP formula as stated in Equation~(\ref{eq:slerp}) exhibits
+numerical instability when $\omega$ is close to zero, i.e., when $\bz_0$ and
+$\bz_1$ are nearly collinear. In this degenerate case, $\sin\omega \approx 0$,
+and the formula involves division by a near-zero quantity. The inventor has
+found that a robust implementation should detect this case and fall back to
+spherical normalization of the standard linear interpolant, which closely
+approximates SLERP when $\omega \ll 1$. Specifically, for $\omega < \epsilon$
+where $\epsilon = 10^{-6}$ in the preferred embodiment, the synthesized
+embedding is computed as:
+
+\begin{equation}
+  \hat{\bz}(t) = \frac{(1-t)\bz_0 + t\bz_1}{\|(1-t)\bz_0 + t\bz_1\|_2},
+  \label{eq:slerp_fallback}
+\end{equation}
+
+\noindent which is equivalent to projecting the linear interpolant back onto the
+unit sphere. This fallback is applied only in the degenerate near-collinear
+case and does not affect the behavior of the algorithm in typical operation.
+
+\subsubsection{Generalized SLERP with $n$-Point Interpolation}
+
+In one alternative embodiment, the SLERP interpolation is generalized to
+synthesize embeddings from weighted combinations of more than two anchor points.
+For a set of anchor embeddings $\{\bz_i\}_{i=1}^n$ and corresponding
+non-negative weights $\{w_i\}_{i=1}^n$ satisfying $\sum_i w_i = 1$, the
+generalized spherical interpolant is computed by iterative application of the
+two-point SLERP formula as follows. Beginning with $\bz_{\text{cur}} = \bz_1$,
+the algorithm iteratively merges each subsequent anchor point:
+
+\begin{equation}
+  \bz_{\text{cur}} \leftarrow \text{SLERP}\!\left(\bz_{\text{cur}},\; \bz_{i+1},\;
+    \frac{w_{i+1}}{\sum_{j=1}^{i+1} w_j}\right),
+  \qquad i = 1, \ldots, n-1.
+  \label{eq:slerp_general}
+\end{equation}
+
+\noindent This generalized formula allows the synthesis of embeddings that
+interpolate among multiple representatives of a class, which may be preferable
+when the minority class exhibits multiple sub-clusters. In the preferred
+two-point embodiment, $n = 2$ and the generalized formula reduces to
+Equation~(\ref{eq:slerp}).
+
+\subsubsection{k-Nearest Neighbor Selection}
+
+For each minority-class embedding $\bz_i$, the SLERP oversampling module
+identifies a set of $k$ nearest neighbors within the same class using the
+cosine similarity metric, which is equivalent to the angular metric on the
+unit sphere. Specifically, for $\bz_0, \bz_1 \in \mathbb{S}^{D-1}$, the cosine
+similarity is $\text{sim}(\bz_0, \bz_1) = \bz_0 \cdot \bz_1 = \cos\omega$.
+The $k$ nearest neighbors of $\bz_i$ are the $k$ embeddings $\bz_j$,
+$j \neq i$, with the highest cosine similarity to $\bz_i$ among all
+same-class embeddings. In the preferred embodiment, $k = 5$.
+
+For each synthetic embedding to be generated, the oversampling module selects
+one of the $k$ nearest neighbors uniformly at random and draws the
+interpolation parameter $t$ uniformly from $(0, 1)$. This procedure ensures
+that synthetic embeddings are distributed throughout the gaps in the
+minority-class sample density, consistent with the motivation of SMOTE.
+
+\subsubsection{Class Homogeneity Constraint}
+
+A critical aspect of the present invention is the enforcement of class
+homogeneity in the SLERP interpolation: the two anchor embeddings $\bz_0$ and
+$\bz_1$ used in Equation~(\ref{eq:slerp}) are always drawn from the same class.
+This constraint ensures that the synthesized embeddings represent plausible
+combinations of same-class image features, rather than cross-class blends that
+could introduce misleading label-feature associations. In an alternative
+embodiment, the class homogeneity constraint may be partially relaxed to permit
+interpolation between embeddings of closely related classes (e.g., different
+breeds of the same animal species), provided that the interpolated embeddings
+are assigned the label of the embedding from which the nearest-neighbor was
+drawn. However, the standard embodiment enforces strict class homogeneity.
+
+\subsection{Class-Conditional DCGAN Decoder}
+
+\subsubsection{Overview of Decoder Architecture}
+
+In the preferred embodiment, the decoder $G_{\btheta}$ is based on the DCGAN
+generator architecture introduced by Radford and colleagues~\cite{radford2016},
+with several important modifications. The DCGAN architecture uses a sequence
+of transposed convolutional layers (also known as fractionally-strided
+convolutions) to progressively upsample the conditioning vector to the target
+image resolution. The modifications introduced in the present invention include:
+incorporation of a learned class embedding that is concatenated to the image
+embedding at the decoder input; placement of a non-local self-attention block
+at the $16 \times 16$ spatial resolution stage; removal of batch normalization
+from all layers; and use of spectral normalization in the decoder.
+
+\subsubsection{Class Embedding and Input Construction}
+
+The decoder input is constructed by concatenating the image embedding
+$\bz \in \mathbb{S}^{D-1}$ with the class embedding $\bm{e}_y \in \RR^{d_c}$
+to form the conditioning vector $\bc = [\bz;\, \bm{e}_y] \in \RR^{D + d_c}$.
+In the preferred embodiment, $d_c = 64$. The class embedding matrix
+$\mathbf{E}_c \in \RR^{K \times 64}$ is initialized with values drawn from
+$\mathcal{N}(0, 0.01)$ and is jointly optimized with all other decoder
+parameters during training.
+
+The inventor has discovered that the concatenation of a learned class embedding
+is substantially more effective than one-hot class conditioning for the
+following reason. One-hot class conditioning provides a sparse signal of
+dimensionality $K$ that contains no notion of class similarity; two distinct
+classes are represented as equally distant regardless of their semantic
+relationship. A learned class embedding, by contrast, develops a distributed
+representation in which semantically similar classes occupy nearby regions of
+the class embedding space. This richer representation enables the decoder to
+exploit shared structure between related classes, which is particularly
+beneficial for cross-class generalization when some classes have few examples.
+
+\subsubsection{Transposed Convolutional Backbone}
+
+The conditioning vector $\bc \in \RR^{D + d_c}$ is first reshaped to a
+$4 \times 4$ spatial feature map with $(D + d_c)/16$ channels, and then
+passed through a sequence of transposed convolutional layers that progressively
+double the spatial resolution while reducing the channel count. In the preferred
+embodiment targeting $128 \times 128$ output resolution, the decoder comprises
+five transposed convolutional layers operating at spatial resolutions
+$4 \times 4$, $8 \times 8$, $16 \times 16$, $32 \times 32$, $64 \times 64$,
+and $128 \times 128$. Each transposed convolutional layer uses a $4 \times 4$
+kernel with stride 2 and padding 1. The channel counts for the five layers are
+512, 256, 128, 64, and the output channel count $C$ (equal to 1 for grayscale
+images and 3 for color images), respectively. Spectral normalization is applied
+to the weight matrices of each transposed convolutional layer.
+
+In an alternative embodiment, the transposed convolutional layers may be
+replaced by resize-convolution blocks, in which a bilinear upsampling operation
+is followed by a standard convolutional layer. The inventor has found that
+resize-convolution can reduce checkerboard artifacts in some image domains,
+though at the cost of some spatial detail. In yet another alternative embodiment,
+the output resolution can be varied by adding or removing transposed
+convolutional layers, enabling the decoder to target any power-of-two output
+resolution from $32 \times 32$ to $512 \times 512$.
+
+\subsubsection{Non-Local Self-Attention Block}
+
+A non-local self-attention block~\cite{zhang2019,wang2018} is inserted in the
+decoder at the $16 \times 16$ spatial resolution stage. Referring to FIG.\ 6,
+for a feature map $\mathbf{F} \in \RR^{H' \times W' \times C'}$ at the
+$16 \times 16$ stage (where $H' = W' = 16$ and $C'$ is the number of channels
+at that stage), the self-attention block operates as follows.
+
+Three $1 \times 1$ convolutional projections are applied to $\mathbf{F}$ to
+produce query, key, and value tensors:
+
+\begin{equation}
+  \mathbf{Q} = \mathbf{W}_Q \mathbf{F}, \quad
+  \mathbf{K} = \mathbf{W}_K \mathbf{F}, \quad
+  \mathbf{V} = \mathbf{W}_V \mathbf{F},
+  \label{eq:qkv}
+\end{equation}
+
+\noindent where $\mathbf{W}_Q, \mathbf{W}_K \in \RR^{(C'/8) \times C'}$ and
+$\mathbf{W}_V \in \RR^{C' \times C'}$ are learnable projection matrices.
+The attention map $\mathbf{A} \in \RR^{(H'W') \times (H'W')}$ is computed as:
+
+\begin{equation}
+  \mathbf{A} = \text{softmax}\!\left(\mathbf{Q}^\top \mathbf{K}\right),
+  \label{eq:attn}
+\end{equation}
+
+\noindent and the attended feature map is $\mathbf{O} = \mathbf{V}\mathbf{A}$.
+The block output is:
+
+\begin{equation}
+  \mathbf{F}' = \mathbf{F} + \gamma_{\text{attn}} \cdot \mathbf{O},
+  \label{eq:attn_out}
+\end{equation}
+
+\noindent where $\gamma_{\text{attn}}$ is a scalar parameter initialized to
+zero. This zero initialization of $\gamma_{\text{attn}}$ ensures that at the
+start of training, the self-attention block contributes nothing to the decoder
+output, allowing the training to begin with the local convolutional structure
+already established before the long-range attention mechanism gradually learns
+to augment it. The inventor has found that this initialization strategy is
+critical for stable training with self-attention, as a non-zero initialization
+frequently causes the attention mechanism to destabilize the early stages of
+training before the convolutional layers have converged to a useful feature
+representation.
+
+The non-local self-attention mechanism enables the decoder to model long-range
+spatial dependencies, which is important for generating structurally coherent
+images in which distant parts of the image must be consistent (e.g., the
+symmetric bilateral structure of faces or animals, or the consistent texture
+of fur across an entire animal body). Purely local convolutional architectures
+cannot model such long-range dependencies without a very deep network, and the
+self-attention block provides a computationally efficient mechanism for
+capturing them.
+
+The placement of the self-attention block at the $16 \times 16$ spatial
+resolution stage is deliberate. At this resolution, the spatial extent of the
+feature map is small enough that the attention mechanism is computationally
+tractable (the attention map has $(16 \times 16)^2 = 65536$ entries), while
+still being large enough to capture meaningful long-range relationships. At
+higher resolutions, the quadratic cost of the attention mechanism becomes
+prohibitive; at lower resolutions (e.g., $4 \times 4$ or $8 \times 8$), the
+spatial structure is too coarse for long-range attention to be meaningful.
+
+In an alternative embodiment, an axial attention mechanism may be used in
+place of the full non-local self-attention, decomposing the 2D attention
+computation into two sequential 1D attention operations along the row and
+column dimensions. This reduces the computational cost from $O((H'W')^2)$ to
+$O(H'^2 + W'^2)$ while retaining the long-range dependency modeling capability.
+In yet another alternative embodiment, multiple self-attention blocks may be
+placed at multiple spatial resolution stages, with the understanding that
+computational cost increases proportionally.
+
+\subsubsection{Batch Normalization Replacement}
+
+The standard DCGAN generator architecture uses batch normalization (BN) in each
+convolutional layer. The present invention departs from this convention by
+removing batch normalization from all decoder layers. The inventor has observed
+that batch normalization introduces complex interactions between samples in a
+training minibatch, particularly when the minibatch contains examples from
+multiple classes with distinct feature statistics. In the class-conditional
+decoder, the class embedding already provides class-specific modulation of the
+feature representations, and batch normalization applied on top of this can
+partially cancel the class-specific modulation by re-normalizing the features
+to a common batch-level distribution.
+
+Furthermore, batch normalization has been shown in the GAN literature to be a
+contributing factor to training instability, particularly in the WGAN training
+regime. By removing batch normalization and replacing it with spectral
+normalization of the weight matrices, the present invention achieves more
+stable training dynamics without sacrificing the regularization benefits of
+normalization.
+
+In an alternative embodiment, conditional batch normalization (CBN) may be
+used, in which the scale and shift parameters of the batch normalization are
+predicted from the class embedding rather than being fixed parameters. This
+allows the normalization statistics to be class-conditional, providing the
+class-specific modulation without the negative interaction described above.
+
+\subsection{The WGAN-GP Discriminator}
+
+\subsubsection{Discriminator Architecture}
+
+In the preferred embodiment, the discriminator $D_{\bpsi}$ is a
+Wasserstein-distance critic~\cite{arjovsky2017,gulrajani2017} implemented as
+a fully convolutional network with strided convolutions. The discriminator
+architecture is the mirror of the decoder in terms of spatial downsampling: it
+comprises five strided convolutional layers that progressively halve the spatial
+resolution and double the channel count, followed by a global average pooling
+layer and a linear output layer producing a scalar critic score. The channel
+counts for the five convolutional layers mirror those of the decoder in reverse
+order. No sigmoid activation is applied to the output, consistent with the
+Wasserstein distance critic formulation.
+
+In the Wasserstein GAN framework~\cite{arjovsky2017}, the discriminator
+functions as a critic estimating the Wasserstein distance between the
+distribution of real images and the distribution of generated images. The
+Wasserstein distance provides a more informative training signal than the
+Jensen-Shannon divergence used in the original GAN formulation, particularly
+when the two distributions have disjoint or near-disjoint supports. Crucially
+for the present application, the Wasserstein distance critic does not saturate
+as the generated distribution diverges from the real distribution, providing
+useful gradients throughout the early stages of training when the generated
+images are of low quality.
+
+\subsubsection{Gradient Penalty}
+
+To enforce the Lipschitz constraint required for the Wasserstein distance
+interpretation, the present invention uses the gradient penalty (GP) approach
+of Gulrajani and colleagues~\cite{gulrajani2017} rather than the weight
+clipping approach of the original WGAN. The gradient penalty loss is defined as:
+
+\begin{equation}
+  \mathcal{L}_{\text{GP}} = \lambda_{\text{GP}}\,
+    \EE_{\hat{\bx}}\!\left[\bigl(\|\nabla_{\hat{\bx}} D_{\bpsi}(\hat{\bx})\|_2 - 1\bigr)^2\right],
+  \label{eq:gp}
+\end{equation}
+
+\noindent where $\hat{\bx} = \epsilon\,\bx_{\text{real}} + (1 - \epsilon)\,\bx_{\text{fake}}$
+with $\epsilon \sim \text{Uniform}[0,1]$ is a random convex interpolation
+between a real image and a generated image, and $\lambda_{\text{GP}} = 10$
+in the preferred embodiment. The gradient penalty enforces the 1-Lipschitz
+constraint on the discriminator by penalizing deviations of the gradient norm
+from unity on interpolated samples.
+
+The inventor has found that the gradient penalty approach is substantially more
+stable than weight clipping in the context of the present application, where
+the small minority-class datasets make training stability particularly
+important. Weight clipping can cause the discriminator to learn degenerate
+critic functions that do not accurately reflect the Wasserstein distance,
+whereas the gradient penalty approach empirically produces well-behaved critics
+even on small datasets.
+
+\subsubsection{Absence of Batch Normalization in Discriminator}
+
+Consistent with the recommendation of Gulrajani and colleagues~\cite{gulrajani2017}
+and the analysis of Miyato and colleagues~\cite{miyato2018}, the discriminator
+in the present invention uses no batch normalization. Batch normalization in
+the discriminator is incompatible with the gradient penalty, because the
+gradient penalty requires computing gradients of the discriminator output with
+respect to the input, and batch normalization makes these gradients depend on
+all other samples in the batch in a way that violates the 1-Lipschitz
+constraint. The discriminator instead uses spectral normalization of weight
+matrices to regularize the Lipschitz constant of the discriminator.
+
+\subsubsection{Intermediate Feature Extraction for Feature Matching}
+
+In addition to the scalar critic score, the discriminator provides intermediate
+feature maps extracted at the output of each strided convolutional layer. These
+intermediate features are used in computing the feature matching loss described
+in the following section. The intermediate feature extraction pathway is
+implemented by registering forward hooks on the selected discriminator layers
+and caching the resulting feature tensors. In the preferred embodiment, features
+are extracted from the outputs of all five strided convolutional layers.
+
+In one alternative embodiment, the discriminator may be replaced by a
+projection discriminator~\cite{miyato2018}, in which the class information is
+incorporated into the discriminator through an inner product between the class
+embedding and a discriminator intermediate representation. This modification
+makes the discriminator class-conditional rather than class-unconditional,
+which may improve the ability of the discriminator to distinguish
+class-conditional quality defects from class-unconditional defects.
+
+\subsection{Phased Training with Multiple Loss Functions}
+
+\subsubsection{Overview of Phased Training Schedule}
+
+The inventor has discovered that training the encoder-decoder system directly
+with the full adversarial objective from the start of training frequently leads
+to training instability, particularly on small datasets. The problem is that
+the adversarial objective requires the discriminator to provide a meaningful
+training signal to the decoder, which is only possible once the decoder is
+generating images of sufficient quality that the discriminator can learn to
+distinguish them from real images. If the decoder is initialized to random
+weights and immediately subjected to adversarial training, the resulting
+training signal is often dominated by noise, and the decoder may fail to
+learn any useful image structure.
+
+The present invention addresses this problem through a phased training schedule
+that divides the total training duration of $T$ epochs into two phases. In
+Phase 1, occupying epochs $0$ through $\lfloor 0.3\,T \rfloor$, training is
+conducted exclusively with the reconstruction loss, allowing the encoder and
+decoder to establish a meaningful reconstruction mapping before adversarial
+training begins. In Phase 2, occupying epochs $\lfloor 0.3\,T \rfloor$ through
+$T$, the full adversarial objective is activated and the Wasserstein GAN
+training proceeds. This phased schedule ensures that the decoder produces
+images of sufficient quality by the start of Phase 2 that the discriminator
+can provide a meaningful and stable training signal throughout adversarial
+training.
+
+Referring to FIG.\ 8, the phased training schedule is illustrated as a
+timeline showing the active loss terms in each phase. In Phase 1, only the
+reconstruction loss $\mathcal{L}_{\text{recon}}$ is active. In Phase 2, the
+reconstruction loss, the WGAN generator loss $\mathcal{L}_G$, the gradient
+penalty loss $\mathcal{L}_{\text{GP}}$, and the feature matching loss
+$\mathcal{L}_{\text{FM}}$ are all active.
+
+\subsubsection{Reconstruction Loss}
+
+In the preferred embodiment, the reconstruction loss $\mathcal{L}_{\text{recon}}$
+is a combination of a pixel-level L1 reconstruction term and a VGG-16
+perceptual loss term~\cite{johnson2016}. The pixel-level L1 term is:
+
+\begin{equation}
+  \mathcal{L}_{\text{L1}} = \EE_{\bx \sim p_{\text{data}}}\!\bigl[\|\bx - G_{\btheta}([\bz;\,\bm{e}_y])\|_1\bigr],
+  \label{eq:l1}
+\end{equation}
+
+\noindent where $\bz = E_{\bphi}(\bx)$ is the unit-norm embedding of $\bx$ and
+$\bm{e}_y$ is the class embedding for class $y$.
+
+The VGG-16 perceptual loss~\cite{simonyan2015,johnson2016} computes the
+discrepancy between the input image and the reconstruction in the feature space
+of a pretrained VGG-16 network. Specifically, the perceptual loss is:
+
+\begin{equation}
+  \mathcal{L}_{\text{perc}} = \sum_{\ell \in \mathcal{L}_{\text{vgg}}}
+    \EE_{\bx}\!\left[\bigl\|\phi_\ell(\bx) - \phi_\ell(G_{\btheta}([\bz;\,\bm{e}_y]))\bigr\|_1\right],
+  \label{eq:perc}
+\end{equation}
+
+\noindent where $\phi_\ell(\cdot)$ denotes the feature map extracted from layer
+$\ell$ of the pretrained VGG-16 network, and $\mathcal{L}_{\text{vgg}}$ is the
+set of VGG-16 layers from which features are extracted. In the preferred
+embodiment, $\mathcal{L}_{\text{vgg}}$ comprises the outputs of VGG-16 layers
+\texttt{relu1\_2}, \texttt{relu2\_2}, \texttt{relu3\_3}, and \texttt{relu4\_3}.
+The combined reconstruction loss is:
+
+\begin{equation}
+  \mathcal{L}_{\text{recon}} = \lambda_{\text{L1}}\,\mathcal{L}_{\text{L1}}
+    + \lambda_{\text{perc}}\,\mathcal{L}_{\text{perc}},
+  \label{eq:recon}
+\end{equation}
+
+\noindent where $\lambda_{\text{L1}} = 10.0$ and $\lambda_{\text{perc}} = 1.0$
+in the preferred embodiment. The perceptual loss encourages the reconstruction
+to be perceptually similar to the input image in terms of high-level feature
+content, rather than merely achieving low pixel-level error. Pixel-level losses
+such as L1 and L2 are known to produce blurry reconstructions because they
+optimize the mean over the distribution of plausible images, whereas perceptual
+losses encourage the reconstruction to have sharp, coherent features.
+
+\subsubsection{Wasserstein GAN Losses}
+
+The adversarial training in Phase 2 uses the Wasserstein GAN objective. The
+discriminator loss is:
+
+\begin{equation}
+  \mathcal{L}_D = -\EE_{\bx \sim p_{\text{data}}}\!\bigl[D_{\bpsi}(\bx)\bigr]
+    + \EE_{\bz \sim p(\bz)}\!\bigl[D_{\bpsi}(G_{\btheta}(\bz))\bigr]
+    + \mathcal{L}_{\text{GP}},
+  \label{eq:disc}
+\end{equation}
+
+\noindent where $\mathcal{L}_{\text{GP}}$ is the gradient penalty defined in
+Equation~(\ref{eq:gp}). The generator loss is:
+
+\begin{equation}
+  \mathcal{L}_G = -\EE_{\bz \sim p(\bz)}\!\bigl[D_{\bpsi}(G_{\btheta}(\bz))\bigr].
+  \label{eq:gen}
+\end{equation}
+
+In Phase 2, the discriminator is updated $n_{\text{disc}} = 5$ times for every
+generator update. This asymmetric update ratio is standard practice in WGAN
+training and ensures that the discriminator maintains a sufficiently tight
+approximation of the Wasserstein distance before each generator update.
+
+\subsubsection{Feature Matching Loss}
+
+The feature matching loss~\cite{salimans2016} is an additional regularization
+term that encourages the generator to produce images whose statistical
+properties in the discriminator's intermediate feature space match those of
+the real images. The feature matching loss is:
+
+\begin{equation}
+  \mathcal{L}_{\text{FM}} = \sum_{\ell \in \mathcal{L}_{\text{disc}}}
+    \EE\!\left[\bigl\|\mathbf{f}_\ell(\bx_{\text{real}}) - \mathbf{f}_\ell(\bx_{\text{fake}})\bigr\|_1\right],
+  \label{eq:fm}
+\end{equation}
+
+\noindent where $\mathbf{f}_\ell(\cdot)$ denotes the feature map extracted at
+layer $\ell$ of the discriminator and $\mathcal{L}_{\text{disc}}$ is the set of
+discriminator layers from which features are extracted. In the preferred
+embodiment, features are extracted from all five strided convolutional layers
+of the discriminator.
+
+The feature matching loss serves two purposes. First, it provides a training
+signal to the generator that is complementary to the Wasserstein adversarial
+signal, encouraging the generator to match the distributional properties of
+real images at multiple levels of abstraction simultaneously. Second, it
+stabilizes training by preventing the generator from exploiting the
+discriminator's blind spots, i.e., aspects of the image distribution that the
+discriminator has not yet learned to evaluate accurately.
+
+\subsubsection{Combined Generator Training Objective}
+
+The complete generator training objective in Phase 2 is:
+
+\begin{equation}
+  \mathcal{L}_{\text{total}} = \lambda_G\,\mathcal{L}_G
+    + \lambda_{\text{recon}}\,\mathcal{L}_{\text{recon}}
+    + \lambda_{\text{FM}}\,\mathcal{L}_{\text{FM}},
+  \label{eq:total}
+\end{equation}
+
+\noindent where $\lambda_G = 1.0$, $\lambda_{\text{recon}} = 1.0$, and
+$\lambda_{\text{FM}} = 10.0$ in the preferred embodiment. The inclusion of the
+reconstruction loss in Phase 2 as well as Phase 1 serves as a regularizer that
+prevents the decoder from drifting too far from reconstruction fidelity in
+pursuit of adversarial quality. The inventor has found that without this
+regularization, adversarial training can cause the decoder to generate images
+that look realistic to the discriminator but no longer faithfully represent the
+content of the input embedding.
+
+\subsubsection{Optimizer Configuration}
+
+Both the encoder-decoder system and the discriminator are optimized with the
+Adam optimizer~\cite{kingma2015}. In the preferred embodiment, the Adam
+hyperparameters are $\beta_1 = 0.5$ and $\beta_2 = 0.999$, with a learning
+rate of $\eta = 0.0002$ for the encoder-decoder system and $\eta = 0.0002$ for
+the discriminator. The choice of $\beta_1 = 0.5$ (rather than the more common
+$\beta_1 = 0.9$) is standard practice for GAN training~\cite{radford2016}, as
+it reduces the momentum of the first-order moment estimate and thus reduces the
+tendency of GAN training to overshoot and oscillate.
+
+\subsubsection{Learning Rate Schedule}
+
+A cosine annealing schedule~\cite{loshchilov2017} is applied to the learning
+rates of both optimizers. The cosine annealing schedule reduces the learning
+rate from its initial value $\eta_0$ to a minimum value $\eta_{\min}$ over the
+course of training according to:
+
+\begin{equation}
+  \eta_t = \eta_{\min} + \frac{1}{2}(\eta_0 - \eta_{\min})
+    \left(1 + \cos\!\left(\frac{t}{T}\,\pi\right)\right),
+  \label{eq:lr}
+\end{equation}
+
+\noindent where $t$ is the current epoch and $T$ is the total number of
+training epochs. In the preferred embodiment, $\eta_{\min} = 0$ and $T$ is
+provided as a hyperparameter.
+
+An important implementation detail concerns the handling of the cosine
+annealing schedule across the phase boundary at epoch $\lfloor 0.3\,T \rfloor$.
+Because Phase 2 begins with the activation of the adversarial objective, it
+is important that the learning rate schedule for the generator optimizer is
+correct at the start of Phase 2. The preferred embodiment achieves this by
+initializing the scheduler with the \texttt{last\_epoch} parameter set to the
+epoch count at the start of Phase 2, ensuring that the cosine annealing
+formula is evaluated at the correct position in the schedule. Specifically,
+when the scheduler is created at the start of Phase 2, the
+\texttt{last\_epoch} is set to $\lfloor 0.3\,T \rfloor$ rather than $0$.
+
+\subsection{Exponential Moving Average of Decoder Parameters}
+
+\subsubsection{Motivation and Definition}
+
+The exponential moving average (EMA) shadow parameter manager maintains a
+parallel set of decoder parameters $\tilde{\btheta}$ that track the
+time-averaged trajectory of the main decoder parameters $\btheta$ during
+training. After each gradient update step, the EMA parameters are updated
+according to:
+
+\begin{equation}
+  \tilde{\btheta}_t = \mu\,\tilde{\btheta}_{t-1} + (1 - \mu)\,\btheta_t,
+  \label{eq:ema}
+\end{equation}
+
+\noindent where $\mu \in (0,1)$ is the EMA decay rate and $\btheta_t$ denotes
+the main decoder parameters after the $t$-th gradient update. In the preferred
+embodiment, $\mu = 0.9999$.
+
+\subsubsection{Effect of EMA on Generative Quality}
+
+The inventor has discovered that the EMA shadow parameters consistently produce
+higher-quality synthetic images than the main training parameters at the end of
+training, as measured by Fr\'{e}chet Inception Distance (FID)~\cite{heusel2017}.
+The improvement arises because the stochastic gradient updates used in GAN
+training impose high-frequency oscillations on the parameter trajectory, and
+these oscillations prevent any single parameter vector along the trajectory from
+achieving the performance of the time-average. The EMA, by averaging over many
+steps of the trajectory, eliminates the high-frequency oscillations and produces
+a parameter vector that more closely approximates the optimum of the training
+objective.
+
+The EMA is accumulated throughout all of Phase 2 training. In Phase 1, EMA
+accumulation is not performed, as the reconstruction-only training of Phase 1
+is more stable and the parameters at the end of Phase 1 are a reliable starting
+point for Phase 2. EMA accumulation is activated at the start of Phase 2 and
+continues until the end of training.
+
+\subsubsection{Post-Training Weight Substitution}
+
+At the end of training, the EMA shadow parameters $\tilde{\btheta}$ are
+permanently substituted for the main decoder parameters $\btheta$. This
+substitution is implemented by copying the EMA shadow parameters into the main
+decoder parameter tensors, so that the resulting decoder model carries only a
+single set of parameters and does not require any special handling during
+inference. The substituted decoder is then saved as the production decoder
+model. Referring to FIG.\ 9, this post-training substitution procedure is
+illustrated schematically.
+
+The permanent substitution approach ensures that inference-time image generation
+uses the EMA-smoothed parameters without requiring any additional complexity in
+the inference code. An alternative approach would be to maintain both sets of
+parameters and select between them at inference time; the inventor has adopted
+the substitution approach for its simplicity and to avoid the risk of
+accidentally using the non-EMA parameters for inference.
+
+\subsubsection{Numerical Considerations}
+
+The inventor has observed that the EMA shadow parameters must be maintained at
+full floating-point precision (FP32 or FP64) even when the main training
+parameters are maintained at reduced precision (FP16 or BF16) for computational
+efficiency. Accumulating EMA in reduced precision can cause the shadow
+parameters to diverge from the true time-average due to rounding errors in
+the accumulation step. In the preferred embodiment, the EMA shadow parameters
+are always maintained at FP32 precision.
+
+\subsection{Universal Dataset Interface}
+
+\subsubsection{Convention-Over-Configuration Approach}
+
+A distinguishing feature of the present invention is its universal dataset
+interface, which allows the system to be applied to any image dataset organized
+according to a standard folder hierarchy without any dataset-specific
+configuration. The convention adopted is that the root dataset directory
+contains one subdirectory per class, with the subdirectory name serving as the
+class label, and each subdirectory contains the image files for that class.
+Formally, the expected directory structure is:
+
+\begin{center}
+  \texttt{root/class\_0/*.jpg}\\
+  \texttt{root/class\_1/*.jpg}\\
+  \texttt{\quad \vdots}\\
+  \texttt{root/class\_K/*.jpg}
+\end{center}
+
+This convention is identical to the \texttt{ImageFolder} convention used by the
+PyTorch data loading library and is compatible with the vast majority of
+publicly available image classification datasets.
+
+\subsubsection{Automatic Class Discovery and Label Encoding}
+
+Upon instantiation of the dataset loader, the universal interface automatically
+enumerates all subdirectories of the root directory, assigns a unique integer
+label to each class (in lexicographic order of class name), and constructs a
+mapping from class name to integer label and from integer label to class name.
+This enumeration is fully automatic and requires no user intervention. The
+dataset loader then constructs a flat list of (image path, label) pairs spanning
+all classes, from which training minibatches are drawn.
+
+The automatic class discovery mechanism adapts to datasets with any number of
+classes $K \geq 2$ and any class distribution, including severely imbalanced
+distributions. The system correctly handles the case in which some classes have
+many examples and others have very few, and automatically identifies which
+classes require oversampling based on a user-specified target class size.
+
+\subsubsection{Image Preprocessing Pipeline}
+
+The universal dataset interface applies a standard image preprocessing pipeline
+to each loaded image: the image is decoded from its on-disk format (JPEG, PNG,
+or TIFF), resized to the target resolution $H \times W$ using bilinear
+interpolation, converted to a floating-point tensor with values in $[0,1]$,
+and normalized to zero mean and unit standard deviation using the per-channel
+statistics of the ImageNet training set ($\mu = [0.485, 0.456, 0.406]$,
+$\sigma = [0.229, 0.224, 0.225]$). This preprocessing pipeline is standard for
+models pretrained on ImageNet, as it ensures compatibility between the input
+distribution seen during ImageNet pretraining and the inputs provided during
+fine-tuning. In the preferred embodiment, the target resolution is $128 \times
+128$; in alternative embodiments, the target resolution can be any power of two
+from $32 \times 32$ to $512 \times 512$.
+
+\subsection{Checkpoint Protocol and Mid-Training Resume}
+
+The training pipeline implements a checkpoint protocol that saves the complete
+state of the training system to disk at the end of each epoch. The checkpoint
+includes the main decoder parameters $\btheta$, the EMA shadow parameters
+$\tilde{\btheta}$, the encoder parameters $\bphi$, the discriminator parameters
+$\bpsi$, the optimizer states for all three optimizers, the scheduler states
+for all schedulers, and the current epoch index and phase index. From this
+checkpoint, training can be resumed seamlessly from the exact point at which
+it was interrupted, including correct restoration of the learning rate schedule
+and EMA shadow parameters.
+
+The handling of the cosine annealing schedule during resume is an important
+implementation detail. The PyTorch scheduler API uses a \texttt{last\_epoch}
+parameter to determine the position in the cosine annealing curve; when
+resuming from a checkpoint saved at epoch $t$, the scheduler must be
+re-instantiated with \texttt{last\_epoch} set to $t - 1$ (since the scheduler
+will call \texttt{step()} once at the start of the resumed epoch, advancing
+to epoch $t$). Failure to restore the \texttt{last\_epoch} parameter correctly
+results in the learning rate being reset to its initial value at the start of
+the resumed training, which can cause severe instability if resuming occurs
+deep into Phase 2 when the learning rate should be near its minimum.
+
+\subsection{Alternative Embodiments}
+
+\subsubsection{Alternative Perceptual Loss Functions}
+
+In one alternative embodiment, the VGG-16 perceptual loss described in
+Equation~(\ref{eq:perc}) may be replaced by a CLIP-based perceptual
+loss~\cite{radford2021}, in which the perceptual similarity between the input
+image and the reconstruction is measured in the feature space of a pretrained
+CLIP visual encoder. The CLIP-based perceptual loss may be preferable in
+applications where the input images are highly diverse and span domains not
+well-represented in the VGG-16 training data. In yet another alternative
+embodiment, both the VGG-16 and CLIP perceptual losses may be used jointly,
+with a weighted combination analogous to Equation~(\ref{eq:recon}).
+
+\subsubsection{Cross-Class SLERP for Extreme Imbalance}
+
+In one alternative embodiment designed for the extreme imbalance regime in which
+some minority classes have fewer than $k$ examples, the SLERP oversampling
+module permits cross-class interpolation under controlled conditions. In this
+alternative embodiment, when the within-class $k$-nearest-neighbor search fails
+to find $k$ neighbors (because the class has fewer than $k$ examples), the
+module falls back to a mixed interpolation strategy in which the nearest
+neighbor is drawn from the same super-class (e.g., the same coarse category in
+a hierarchical class taxonomy) rather than the same fine-grained class. The
+interpolated embedding is then assigned the label of the source embedding
+(the minority class example), not the label of the nearest-neighbor example.
+This alternative embodiment extends the applicability of the method to datasets
+with very small minority classes while maintaining label integrity.
+
+\subsubsection{Online Synthesis During Training}
+
+In one alternative embodiment, synthetic images are generated online during
+training rather than in a separate post-training synthesis phase. In this
+alternative embodiment, the SLERP oversampling module operates on a running
+buffer of embeddings computed during the current training minibatch, and the
+decoder generates synthetic images from the SLERP embeddings as part of each
+training step. The synthetic images are included in the training minibatch as
+augmented examples with their corresponding class labels. This online synthesis
+approach allows the synthetic image distribution to adapt continuously as the
+encoder and decoder improve, potentially providing higher-quality synthetic
+images throughout training. However, it requires more careful management of the
+training batch to avoid the synthetic images being used as targets for the
+discriminator, which would create a circular training dependency.
+
+\subsubsection{Multi-Scale Discriminator}
+
+In one alternative embodiment, the single discriminator described herein is
+replaced by a multi-scale discriminator comprising three or more
+discriminator networks operating at different spatial resolutions (e.g.,
+$128 \times 128$, $64 \times 64$, $32 \times 32$). Each discriminator network
+produces a separate critic score, and the discriminator loss is the sum of the
+individual critic losses. The multi-scale discriminator encourages the decoder
+to generate realistic structures at multiple spatial scales simultaneously,
+which may be beneficial for high-resolution synthesis tasks.
+
+\subsubsection{Hardware and Parallelism}
+
+The present invention is implemented on one or more computing devices comprising
+central processing units (CPUs) and graphics processing units (GPUs). In the
+preferred embodiment, all deep learning computations are performed on a single
+GPU using the PyTorch deep learning framework. For large datasets requiring
+longer training, the invention may be extended to multi-GPU data-parallel
+training by distributing the training minibatch across multiple GPUs and
+aggregating gradients using all-reduce operations. The WGAN-GP gradient penalty
+computation must be performed synchronously per-GPU (before gradient
+aggregation) to ensure that the gradient norms are computed with respect to the
+correct device-local computation graph.
+
+\subsection{Illustrative Tables}
+
+Table~\ref{tab:hyper} summarizes the principal hyperparameters of the preferred
+embodiment.
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameters of the Preferred Embodiment}
+\label{tab:hyper}
+\begin{tabular}{lll}
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Value} \\
+\midrule
+Embedding dimensionality  & $D$                       & 512 \\
+Class embedding dim       & $d_c$                     & 64  \\
+SLERP $k$-neighbors       & $k$                       & 5   \\
+EMA decay                 & $\mu$                     & 0.9999 \\
+GP coefficient            & $\lambda_{\text{GP}}$     & 10.0 \\
+FM loss weight            & $\lambda_{\text{FM}}$     & 10.0 \\
+L1 loss weight            & $\lambda_{\text{L1}}$     & 10.0 \\
+Perceptual loss weight    & $\lambda_{\text{perc}}$   & 1.0 \\
+Generator loss weight     & $\lambda_G$               & 1.0 \\
+Learning rate             & $\eta$                    & 0.0002 \\
+Adam $\beta_1$            & $\beta_1$                 & 0.5 \\
+Adam $\beta_2$            & $\beta_2$                 & 0.999 \\
+Phase boundary            & —                         & 30\% of epochs \\
+Disc updates per gen step & $n_{\text{disc}}$         & 5 \\
+Attn $\gamma$ init        & $\gamma_{\text{attn}}$    & 0.0 \\
+Fallback threshold        & $\epsilon$                & $10^{-6}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:arch} summarizes the architecture of the decoder in the
+preferred embodiment for $128 \times 128$ output images.
+
+\begin{table}[H]
+\centering
+\caption{Decoder Architecture for $128 \times 128$ Output Resolution}
+\label{tab:arch}
+\begin{tabular}{llll}
+\toprule
+\textbf{Layer} & \textbf{Type} & \textbf{Output size} & \textbf{Note} \\
+\midrule
+Input linear   & Linear        & $512 \times 1 \times 1$  & Reshape to $4 \times 4$ \\
+Block 1        & ConvTranspose2d $4\times4$ s2p1 & $4 \times 4 \times 512$ & \\
+Block 2        & ConvTranspose2d $4\times4$ s2p1 & $8 \times 8 \times 256$ & \\
+Self-attention & Non-local SA                & $16 \times 16 \times 128$ & $\gamma=0$ init \\
+Block 3        & ConvTranspose2d $4\times4$ s2p1 & $16 \times 16 \times 128$ & \\
+Block 4        & ConvTranspose2d $4\times4$ s2p1 & $32 \times 32 \times 64$ & \\
+Block 5        & ConvTranspose2d $4\times4$ s2p1 & $64 \times 64 \times 64$ & \\
+Block 6        & ConvTranspose2d $4\times4$ s2p1 & $128 \times 128 \times 3$ & Tanh output \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Illustrative Figures}
+
+The following figures illustrate key aspects of the disclosed system and method.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rectangle, rounded corners=3pt,
+              minimum width=2.8cm, minimum height=0.8cm,
+              font=\small, align=center},
+  arr/.style={-Stealth, thick},
+  dasharr/.style={-Stealth, thick, dashed},
+  node distance=0.8cm and 1.2cm
+]
+
+%% Column 1: Input
+\node[box] (img) {Input Image\\$\bx$};
+
+%% Column 2: Encoder
+\node[box, right=1.6cm of img] (enc) {Encoder $E_{\bphi}$\\(ResNet+L2)};
+
+%% Column 3: SLERP
+\node[box, right=1.6cm of enc] (slerp) {SLERP\\Oversampler};
+
+%% Column 4: Decoder
+\node[box, right=1.6cm of slerp] (dec) {Decoder $G_{\btheta}$\\(Class-Cond.)};
+
+%% Column 5: Output
+\node[box, right=1.6cm of dec] (out) {Synthetic\\Image $\hat{\bx}$};
+
+%% Class label input
+\node[box, below=1.4cm of slerp] (cls) {Class Emb.\\$\mathbf{E}_c[y]$};
+
+%% EMA manager (below decoder)
+\node[box, below=1.4cm of dec] (ema) {EMA Manager\\$\tilde{\btheta}$};
+
+%% Discriminator (below output)
+\node[box, below=1.4cm of out] (disc) {Discriminator\\$D_{\bpsi}$};
+
+%% Main forward path arrows
+\draw[arr] (img) -- (enc) node[midway,above]{\small $\bx$};
+\draw[arr] (enc) -- (slerp) node[midway,above]{\small $\bz$};
+\draw[arr] (slerp) -- (dec) node[midway,above]{\small $\hat{\bz}$};
+\draw[arr] (dec) -- (out) node[midway,above]{\small $\hat{\bx}$};
+
+%% Class embedding
+\draw[arr] (cls.north) -- ++(0,0.6) -| (dec.south) node[near start, right]{\small $\bm{e}_y$};
+
+%% EMA update
+\draw[dasharr] (dec.south) -- (ema.north) node[midway,right]{\small update};
+
+%% Discriminator
+\draw[arr] (out.south) -- (disc.north);
+
+\end{tikzpicture}
+\caption{Block diagram of the system architecture. The encoder maps the input
+image to a unit-norm embedding, the SLERP oversampler synthesizes new
+embeddings, and the class-conditional decoder generates synthetic images.
+The EMA manager tracks decoder parameters throughout training.}
+\label{fig:system}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[scale=2.2]
+  %% Draw unit circle
+  \draw[thick] (0,0) circle (1cm);
+  \node at (0,-1.25) {\small Unit Hypersphere $\mathbb{S}^{D-1}$};
+
+  %% Two anchor points
+  \coordinate (z0) at ({cos(30)},{sin(30)});
+  \coordinate (z1) at ({cos(150)},{sin(150)});
+  \fill[black] (z0) circle (1.5pt) node[right]{\small $\bz_0$};
+  \fill[black] (z1) circle (1.5pt) node[left]{\small $\bz_1$};
+
+  %% LERP chord (departs sphere)
+  \draw[thick,gray,dashed] (z0) -- (z1)
+    node[midway,below,gray]{\small LERP (departs sphere)};
+  \fill[gray] ({(cos(30)+cos(150))/2},{(sin(30)+sin(150))/2}) circle (1.5pt);
+
+  %% SLERP arc
+  \draw[thick,blue,domain=30:150,samples=60]
+    plot ({cos(\x)},{sin(\x)});
+  \node[blue] at (0,1.12) {\small SLERP (geodesic arc)};
+
+  %% Midpoint on arc
+  \fill[blue] ({cos(90)},{sin(90)}) circle (1.5pt)
+    node[right,blue]{\small $\hat{\bz}(0.5)$};
+
+  %% Angle label
+  \draw[thin,->] (0.35,0) arc (0:90:0.35);
+  \node at (0.22,0.22) {\small $\omega$};
+\end{tikzpicture}
+\caption{Geometric illustration of LERP vs.\ SLERP on the unit hypersphere.
+LERP traverses the chord and departs from the sphere, while SLERP traverses
+the geodesic arc and remains on the sphere.}
+\label{fig:slerp_geom}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rectangle, minimum width=3cm, minimum height=0.6cm,
+              font=\small, align=center},
+  arr/.style={-Stealth, thick},
+  node distance=0.3cm
+]
+  \node[box, fill=green!15] (p1) {Phase 1: Epochs $0 \to 0.3T$};
+  \node[box, fill=blue!15, right=1cm of p1] (p2) {Phase 2: Epochs $0.3T \to T$};
+
+  %% Loss terms below
+  \node[font=\small, below=0.5cm of p1] (l1) {$\mathcal{L}_{\text{recon}}$ active};
+  \node[font=\small, below=0.5cm of p2] (l2)
+    {$\mathcal{L}_G + \mathcal{L}_{\text{GP}} + \mathcal{L}_{\text{FM}} + \mathcal{L}_{\text{recon}}$ active};
+
+  \draw[arr] (p1) -- (p2) node[midway,above]{\small Phase transition};
+  \draw[arr] (p1.south) -- (l1.north);
+  \draw[arr] (p2.south) -- (l2.north);
+\end{tikzpicture}
+\caption{Phased training schedule. Phase 1 uses only the reconstruction loss
+to establish meaningful encoder-decoder mappings. Phase 2 activates full
+adversarial training with WGAN-GP and feature matching.}
+\label{fig:phases}
+\end{figure}
+
+\subsection{Algorithm Pseudocode}
+
+\begin{algorithm}[H]
+\caption{SLERP-SMOTE Oversampling (Inference)}
+\label{alg:slerp}
+\begin{algorithmic}[1]
+\Require Trained encoder $E_{\bphi}$, training images $\{\bx_i, y_i\}_{i=1}^N$,
+         EMA decoder $G_{\tilde{\btheta}}$, target count per class $N_{\text{target}}$,
+         neighbors $k=5$
+\State Compute embeddings: $\bz_i \leftarrow E_{\bphi}(\bx_i)$ for all $i$
+\For{each class $c$ with $n_c < N_{\text{target}}$}
+  \State $\mathcal{Z}_c \leftarrow \{\bz_i : y_i = c\}$
+  \State $n_{\text{syn}} \leftarrow N_{\text{target}} - n_c$
+  \For{$s = 1$ to $n_{\text{syn}}$}
+    \State Sample anchor $\bz_0 \sim \mathcal{Z}_c$ uniformly at random
+    \State Compute $k$-NN of $\bz_0$ in $\mathcal{Z}_c$ by cosine similarity
+    \State Sample neighbor $\bz_1$ from the $k$-NN uniformly at random
+    \State Compute $\omega \leftarrow \arccos(\bz_0 \cdot \bz_1)$
+    \If{$\omega < 10^{-6}$}
+      \State $t \sim \text{Uniform}(0,1)$
+      \State $\hat{\bz} \leftarrow \text{normalize}((1-t)\bz_0 + t\bz_1)$
+    \Else
+      \State $t \sim \text{Uniform}(0,1)$
+      \State $\hat{\bz} \leftarrow \frac{\sin((1-t)\omega)}{\sin\omega}\bz_0
+              + \frac{\sin(t\omega)}{\sin\omega}\bz_1$
+    \EndIf
+    \State Compute class embedding $\bm{e}_c \leftarrow \mathbf{E}_c[c]$
+    \State Generate synthetic image: $\hat{\bx} \leftarrow G_{\tilde{\btheta}}([\hat{\bz};\,\bm{e}_c])$
+    \State Add $(\hat{\bx}, c)$ to the augmented training corpus
+  \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{End-to-End Training Procedure}
+\label{alg:train}
+\begin{algorithmic}[1]
+\Require Dataset $\mathcal{D}$, total epochs $T$, phase boundary $\tau = 0.3T$
+\State Initialize $E_{\bphi}$, $G_{\btheta}$, $D_{\bpsi}$, EMA shadow $\tilde{\btheta} \leftarrow \btheta$
+\State Initialize Adam optimizers $\text{opt}_{EG}$, $\text{opt}_D$
+\State Initialize cosine schedulers with $T_{\max} = T$
+\For{epoch $t = 0$ to $T-1$}
+  \For{each minibatch $(\bx, y) \sim \mathcal{D}$}
+    \State $\bz \leftarrow E_{\bphi}(\bx)$; $\bm{e}_y \leftarrow \mathbf{E}_c[y]$
+    \State $\hat{\bx} \leftarrow G_{\btheta}([\bz;\,\bm{e}_y])$
+    \State $\mathcal{L}_{\text{recon}} \leftarrow \lambda_{\text{L1}}\|\bx - \hat{\bx}\|_1 + \lambda_{\text{perc}}\mathcal{L}_{\text{perc}}(\bx, \hat{\bx})$
+    \If{$t \geq \tau$} \Comment{Phase 2 only}
+      \For{$n = 1$ to $n_{\text{disc}}$}
+        \State Update $D_{\bpsi}$ with $\mathcal{L}_D$ (Eq.~\ref{eq:disc})
+      \EndFor
+      \State $\mathcal{L}_{\text{FM}} \leftarrow$ feature matching loss (Eq.~\ref{eq:fm})
+      \State $\mathcal{L}_{\text{total}} \leftarrow \lambda_G \mathcal{L}_G + \lambda_{\text{recon}}\mathcal{L}_{\text{recon}} + \lambda_{\text{FM}}\mathcal{L}_{\text{FM}}$
+    \Else
+      \State $\mathcal{L}_{\text{total}} \leftarrow \mathcal{L}_{\text{recon}}$
+    \EndIf
+    \State Update $E_{\bphi}, G_{\btheta}$ with $\nabla_{\bphi,\btheta}\mathcal{L}_{\text{total}}$
+    \If{$t \geq \tau$}
+      \State $\tilde{\btheta} \leftarrow \mu\,\tilde{\btheta} + (1-\mu)\,\btheta$ \Comment{EMA update}
+    \EndIf
+  \EndFor
+  \State Step schedulers
+  \State Save checkpoint
+\EndFor
+\State $\btheta \leftarrow \tilde{\btheta}$ \Comment{Permanent EMA substitution}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Quality Assessment Metrics}
+
+\subsubsection{Fr\'{e}chet Inception Distance}
+
+The primary metric used to evaluate the quality of synthetic images in the
+present invention is the Fr\'{e}chet Inception Distance
+(FID)~\cite{heusel2017}, which measures the distance between the distribution
+of real images and the distribution of synthetic images in the feature space
+of a pretrained Inception-v3 network~\cite{szegedy2016}. The FID is computed
+as:
+
+\begin{equation}
+  \text{FID} = \|\bm{\mu}_r - \bm{\mu}_s\|_2^2
+    + \text{tr}\!\left(\bm{\Sigma}_r + \bm{\Sigma}_s
+      - 2\bigl(\bm{\Sigma}_r \bm{\Sigma}_s\bigr)^{1/2}\right),
+  \label{eq:fid}
+\end{equation}
+
+\noindent where $(\bm{\mu}_r, \bm{\Sigma}_r)$ and $(\bm{\mu}_s, \bm{\Sigma}_s)$
+denote the mean and covariance of the Inception-v3 feature distribution for
+real and synthetic images, respectively. Lower FID values indicate higher
+quality and greater diversity of the synthetic images.
+
+\subsubsection{Intra-Class FID}
+
+In addition to the standard FID computed over all classes jointly, the present
+invention computes an intra-class FID for each class separately. The intra-
+class FID measures the quality and diversity of synthetic images within each
+class independently, providing a more fine-grained assessment of the synthesis
+quality that is particularly relevant for class-balancing applications where
+the synthesis quality of each class is separately important.
+
+\subsubsection{Downstream Classifier Performance}
+
+The ultimate measure of the utility of the synthetic images is the performance
+of a downstream image classifier trained on the augmented dataset (real images
+plus synthetic images) relative to a classifier trained on the original
+imbalanced dataset. The standard metrics for this comparison are per-class
+recall, F1 score, and area under the receiver operating characteristic curve
+(AUROC). An improvement in per-class recall for the minority classes, with
+minimal degradation in majority-class accuracy, indicates that the synthetic
+images provide genuine training benefit to the downstream classifier.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\newpage
+\section*{CLAIMS}
+% ══════════════════════════════════════════════════════════════════════════════
+
+What is claimed is:
+
+\begin{claims}
+
+\item A computer-implemented method for generating class-conditional synthetic
+images to address class imbalance in an image dataset, the method comprising:
+receiving, by a processing system, an image dataset comprising a plurality of
+images organized by class label, wherein at least one class is underrepresented
+relative to at least one other class;
+encoding, by a convolutional neural network encoder augmented with an L2
+normalization head, each image to a unit-norm embedding vector on a unit
+hypersphere $\mathbb{S}^{D-1}$, wherein $D$ is an embedding dimensionality;
+constructing, for each underrepresented class, a synthetic embedding vector by
+spherical linear interpolation (SLERP) along a geodesic arc of $\mathbb{S}^{D-1}$
+connecting a first same-class unit-norm embedding vector and a second same-class
+unit-norm embedding vector, wherein the synthetic embedding vector satisfies the
+unit-norm constraint;
+forming a conditioning vector by concatenating the synthetic embedding vector
+with a learned class embedding vector output by a class embedding matrix indexed
+by the class label of the underrepresented class; and
+generating, by a class-conditional convolutional decoder receiving the
+conditioning vector, a synthetic image for the underrepresented class.
+
+\item The method of claim 1, wherein the SLERP is computed according to
+$\hat{\bz}(t) = \frac{\sin((1-t)\omega)}{\sin\omega}\bz_0 +
+\frac{\sin(t\omega)}{\sin\omega}\bz_1$, wherein $\bz_0$ and $\bz_1$ are the
+first and second same-class unit-norm embedding vectors, $\omega =
+\arccos(\bz_0 \cdot \bz_1)$ is the angle between them, and $t$ is a
+uniformly sampled interpolation parameter in $(0,1)$.
+
+\item The method of claim 2, further comprising detecting when $\omega$ is
+less than a threshold $\epsilon$ and, upon such detection, computing the
+synthetic embedding vector as the L2 normalization of the linear interpolant
+$(1-t)\bz_0 + t\bz_1$.
+
+\item The method of claim 1, wherein the second same-class unit-norm embedding
+vector is selected from a set of $k$ nearest neighbors of the first same-class
+unit-norm embedding vector within the same class, wherein nearest neighbors
+are determined using cosine similarity.
+
+\item The method of claim 4, wherein $k = 5$.
+
+\item The method of claim 1, wherein the L2 normalization head comprises a
+linear projection layer followed by an L2 normalization operation that maps
+the projection output to the unit hypersphere.
+
+\item The method of claim 1, wherein the convolutional neural network encoder
+comprises a ResNet backbone and wherein a feature vector produced by the
+ResNet backbone is provided to the L2 normalization head.
+
+\item The method of claim 7, wherein the ResNet backbone is initialized from
+ImageNet pretrained weights.
+
+\item The method of claim 1, wherein the class-conditional convolutional decoder
+comprises a sequence of transposed convolutional layers and a non-local
+self-attention block placed at a spatial resolution of $16 \times 16$.
+
+\item The method of claim 9, wherein the non-local self-attention block
+computes a self-attention output and combines it with an input feature map
+as: $\mathbf{F}' = \mathbf{F} + \gamma_{\text{attn}} \cdot \mathbf{O}$,
+wherein $\gamma_{\text{attn}}$ is initialized to zero.
+
+\item The method of claim 9, wherein the class-conditional convolutional decoder
+excludes batch normalization from all layers.
+
+\item The method of claim 1, further comprising jointly training the encoder
+and decoder using a phased training schedule comprising a first phase in which
+only a reconstruction loss is active and a second phase in which a Wasserstein
+GAN loss with gradient penalty and a feature matching loss are additionally
+activated.
+
+\item The method of claim 12, wherein the first phase occupies approximately
+the first thirty percent of total training epochs and the second phase occupies
+the remaining approximately seventy percent.
+
+\item The method of claim 12, wherein the reconstruction loss comprises a pixel-
+level L1 loss and a perceptual loss computed in a feature space of a pretrained
+VGG-16 network.
+
+\item The method of claim 12, wherein the feature matching loss comprises an
+L1 discrepancy between discriminator intermediate feature maps extracted from
+real images and discriminator intermediate feature maps extracted from
+reconstructed images.
+
+\item The method of claim 12, further comprising maintaining exponential moving
+average shadow parameters of the decoder throughout the second phase, wherein
+the shadow parameters are updated after each gradient step according to
+$\tilde{\btheta}_t = \mu\,\tilde{\btheta}_{t-1} + (1-\mu)\,\btheta_t$, and
+permanently substituting the shadow parameters for the decoder parameters
+upon training completion.
+
+\item The method of claim 16, wherein $\mu = 0.9999$.
+
+\item The method of claim 12, wherein the Wasserstein GAN gradient penalty
+is $\lambda_{\text{GP}} \cdot \mathbb{E}[(\|\nabla_{\hat{x}} D(\hat{x})\|_2 - 1)^2]$
+with $\lambda_{\text{GP}} = 10$.
+
+\item The method of claim 1, wherein the learned class embedding vector has
+dimensionality $d_c = 64$ and is drawn from a class embedding matrix
+$\mathbf{E}_c \in \mathbb{R}^{K \times 64}$ that is jointly trained with the
+encoder and decoder.
+
+\item The method of claim 1, further comprising loading the image dataset using
+a universal dataset interface that automatically discovers class labels by
+enumerating subdirectories of a root directory, without requiring dataset-
+specific configuration code.
+
+\item A system for generating class-conditional synthetic images to address
+class imbalance in an image dataset, the system comprising:
+a processor and a non-transitory computer-readable memory storing instructions
+that, when executed by the processor, configure the processor to implement:
+a convolutional encoder comprising a backbone neural network and an L2
+normalization head that maps each input image to a unit-norm embedding vector
+on a unit hypersphere $\mathbb{S}^{D-1}$;
+a spherical linear interpolation (SLERP) oversampling module configured to
+generate synthetic unit-norm embedding vectors along class-homogeneous
+geodesic arcs of $\mathbb{S}^{D-1}$;
+a class-conditional convolutional decoder comprising a class embedding lookup
+table and a sequence of transposed convolutional layers, wherein the decoder
+input is formed by concatenating a synthetic embedding vector with a class
+embedding vector; and
+an exponential moving average (EMA) manager configured to maintain shadow
+decoder parameters and permanently substitute them for the main decoder
+parameters upon training completion.
+
+\item The system of claim 21, wherein the SLERP oversampling module selects
+anchor embedding vectors using $k$-nearest-neighbor search in cosine similarity
+space with $k = 5$.
+
+\item The system of claim 21, wherein the class-conditional convolutional
+decoder further comprises a non-local self-attention block at the
+$16 \times 16$ spatial resolution stage with a scalar output scale parameter
+initialized to zero.
+
+\item The system of claim 21, further comprising a Wasserstein GAN discriminator
+with gradient penalty and intermediate feature extraction for feature matching
+loss computation.
+
+\item The system of claim 21, further comprising a universal dataset interface
+that automatically discovers class labels from a root directory folder structure
+without dataset-specific configuration.
+
+\item The system of claim 21, wherein the EMA manager updates shadow parameters
+according to $\tilde{\btheta}_t = \mu\,\tilde{\btheta}_{t-1} + (1-\mu)\,\btheta_t$
+with decay $\mu = 0.9999$.
+
+\item A non-transitory computer-readable medium storing instructions that,
+when executed by one or more processors, cause the processors to perform a
+method comprising:
+encoding a plurality of training images belonging to an underrepresented class
+to unit-norm embedding vectors on a unit hypersphere using a convolutional
+encoder with an L2 normalization head;
+for each synthetic image to be generated, selecting two same-class unit-norm
+embedding vectors and computing a synthetic embedding vector by spherical
+linear interpolation (SLERP) along the geodesic arc connecting them;
+forming a decoder input by concatenating the synthetic embedding vector with a
+learned class embedding vector;
+decoding the decoder input to a synthetic image using a class-conditional
+decoder having transposed convolutional layers and a self-attention block with
+a zero-initialized output scale; and
+adding the synthetic image to a training corpus for training an image
+classifier.
+
+\item The computer-readable medium of claim 27, wherein the method further
+comprises training the encoder and decoder using a phased schedule comprising
+a reconstruction-only phase followed by a Wasserstein GAN training phase, and
+maintaining EMA shadow parameters throughout the Wasserstein GAN training
+phase.
+
+\item The computer-readable medium of claim 27, wherein the SLERP computation
+falls back to L2-normalized linear interpolation when the angle between the
+two anchor embedding vectors is less than $10^{-6}$ radians.
+
+\item A method for training an adversarial image synthesis system for class-
+conditional image oversampling, the method comprising:
+initializing a convolutional encoder with an L2 normalization head, a class-
+conditional DCGAN decoder, and a WGAN-GP discriminator;
+in a first training phase, updating encoder and decoder parameters using only a
+reconstruction loss comprising a pixel-level term and a perceptual loss term;
+upon reaching a phase boundary at approximately thirty percent of total training
+epochs, transitioning to a second training phase in which a Wasserstein GAN
+loss with gradient penalty, a feature matching loss, and the reconstruction
+loss are jointly optimized;
+maintaining exponential moving average shadow parameters of the decoder
+throughout the second training phase; and
+upon completion of training, substituting the EMA shadow parameters into the
+decoder and saving the resulting decoder as a production image synthesis model.
+
+\end{claims}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\newpage
+\section*{ABSTRACT}
+% ══════════════════════════════════════════════════════════════════════════════
+
+A system and method for generating photorealistic class-conditional synthetic
+images to address class imbalance in image datasets. A convolutional neural
+network encoder, augmented with an L2 normalization head that projects outputs
+onto a unit hypersphere $\mathbb{S}^{D-1}$, maps training images to unit-norm
+embedding vectors. A spherical oversampling module synthesizes new embedding
+vectors by spherical linear interpolation (SLERP) along geodesic arcs
+connecting $k$-nearest-neighbor pairs within each minority class, preserving
+the unit-norm constraint and maintaining manifold fidelity. A class-conditional
+DCGAN decoder, conditioned by concatenating a learned class embedding with the
+image embedding, decodes each synthetic embedding to a synthetic image. The
+decoder incorporates a non-local self-attention block at $16\times16$ spatial
+resolution with $\gamma$-initialized-to-zero weighting. Encoder and decoder are
+jointly trained through a phased schedule: reconstruction-only training for
+the first thirty percent of epochs to establish a meaningful embedding
+structure, followed by Wasserstein GAN training with gradient penalty and
+feature matching loss for the remaining seventy percent. An exponential moving
+average manager accumulates shadow decoder parameters with decay $\mu = 0.9999$
+and permanently substitutes them for the main decoder parameters post-training.
+A universal dataset interface ingests any folder-structured image dataset
+without dataset-specific configuration. The resulting system generates
+class-faithful synthetic images that demonstrably improve downstream classifier
+performance on class-imbalanced datasets.
+
+% ══════════════════════════════════════════════════════════════════════════════
+\newpage
+\begin{thebibliography}{99}
+
+\bibitem{chawla2002}
+N.~V.~Chawla, K.~W.~Bowyer, L.~O.~Hall, and W.~P.~Kegelmeyer,
+``SMOTE: Synthetic Minority Over-sampling Technique,''
+\textit{Journal of Artificial Intelligence Research}, vol.~16,
+pp.~321--357, 2002.
+
+\bibitem{he2016}
+K.~He, X.~Zhang, S.~Ren, and J.~Sun,
+``Deep Residual Learning for Image Recognition,''
+\textit{Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR)}, Las Vegas, NV, pp.~770--778, 2016.
+
+\bibitem{radford2016}
+A.~Radford, L.~Metz, and S.~Chintala,
+``Unsupervised Representation Learning with Deep Convolutional Generative
+Adversarial Networks,''
+\textit{International Conference on Learning Representations (ICLR)},
+San Juan, PR, 2016.
+
+\bibitem{gulrajani2017}
+I.~Gulrajani, F.~Ahmed, M.~Arjovsky, V.~Dumoulin, and A.~Courville,
+``Improved Training of Wasserstein GANs,''
+\textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~30, Long Beach, CA, pp.~5767--5777, 2017.
+
+\bibitem{zhang2019}
+H.~Zhang, I.~Goodfellow, D.~Metaxas, and A.~Odena,
+``Self-Attention Generative Adversarial Networks,''
+\textit{Proceedings of the 36th International Conference on Machine Learning
+(ICML)}, Long Beach, CA, pp.~7354--7363, 2019.
+
+\bibitem{wang2018}
+X.~Wang, R.~Girshick, A.~Gupta, and K.~He,
+``Non-local Means in Deep Neural Networks for Video Classification,''
+\textit{Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR)}, Salt Lake City, UT, pp.~7794--7803, 2018.
+
+\bibitem{simonyan2015}
+K.~Simonyan and A.~Zisserman,
+``Very Deep Convolutional Networks for Large-Scale Image Recognition,''
+\textit{International Conference on Learning Representations (ICLR)},
+San Diego, CA, 2015.
+
+\bibitem{szegedy2016}
+C.~Szegedy, V.~Vanhoucke, S.~Ioffe, J.~Shlens, and Z.~Wojna,
+``Rethinking the Inception Architecture for Computer Vision,''
+\textit{Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR)}, Las Vegas, NV, pp.~2818--2826, 2016.
+
+\bibitem{heusel2017}
+M.~Heusel, H.~Ramsauer, T.~Unterthiner, B.~Nessler, and S.~Hochreiter,
+``GANs Trained by a Two Time-Scale Update Rule Converge to a Local
+Nash Equilibrium,''
+\textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~30, Long Beach, CA, pp.~6626--6637, 2017.
+
+\bibitem{kingma2015}
+D.~P.~Kingma and J.~Ba,
+``Adam: A Method for Stochastic Optimization,''
+\textit{International Conference on Learning Representations (ICLR)},
+San Diego, CA, 2015.
+
+\bibitem{loshchilov2017}
+I.~Loshchilov and F.~Hutter,
+``SGDR: Stochastic Gradient Descent with Warm Restarts,''
+\textit{International Conference on Learning Representations (ICLR)},
+Toulon, France, 2017.
+
+\bibitem{salimans2016}
+T.~Salimans, I.~Goodfellow, W.~Zaremba, V.~Cheung, A.~Radford, and X.~Chen,
+``Improved Techniques for Training GANs,''
+\textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~29, Barcelona, Spain, pp.~2234--2242, 2016.
+
+\bibitem{arjovsky2017}
+M.~Arjovsky, S.~Chintala, and L.~Bottou,
+``Wasserstein Generative Adversarial Networks,''
+\textit{Proceedings of the 34th International Conference on Machine Learning
+(ICML)}, Sydney, Australia, pp.~214--223, 2017.
+
+\bibitem{johnson2016}
+J.~Johnson, A.~Alahi, and L.~Fei-Fei,
+``Perceptual Losses for Real-Time Style Transfer and Super-Resolution,''
+\textit{European Conference on Computer Vision (ECCV)},
+Amsterdam, Netherlands, pp.~694--711, 2016.
+
+\bibitem{miyato2018}
+T.~Miyato, T.~Kataoka, M.~Koyama, and Y.~Yoshida,
+``Spectral Normalization for Generative Adversarial Networks,''
+\textit{International Conference on Learning Representations (ICLR)},
+Vancouver, Canada, 2018.
+
+\bibitem{radford2021}
+A.~Radford, J.~W.~Kim, C.~Hallacy, A.~Ramesh, G.~Goh, S.~Agarwal,
+G.~Sastry, A.~Askell, P.~Mishkin, J.~Clark, G.~Krueger, and I.~Sutskever,
+``Learning Transferable Visual Models From Natural Language Supervision,''
+\textit{Proceedings of the 38th International Conference on Machine Learning
+(ICML)}, pp.~8748--8763, 2021.
+
+\bibitem{shorten2019}
+C.~Shorten and T.~M.~Khoshgoftaar,
+``A Survey on Image Data Augmentation for Deep Learning,''
+\textit{Journal of Big Data}, vol.~6, no.~1, pp.~1--48, 2019.
+
+\bibitem{goodfellow2014}
+I.~Goodfellow, J.~Pouget-Abadie, M.~Mirza, B.~Xu, D.~Warde-Farley,
+S.~Ozair, A.~Courville, and Y.~Bengio,
+``Generative Adversarial Nets,''
+\textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~27, Montreal, Canada, pp.~2672--2680, 2014.
+
+\end{thebibliography}
+
+\end{document}
