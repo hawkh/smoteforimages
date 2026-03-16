@@ -239,7 +239,7 @@ class BaseDecoder(ABC):
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
         
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
         
         # Validate compatibility
         if checkpoint['embedding_dim'] != self.embedding_dim:

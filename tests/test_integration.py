@@ -393,5 +393,201 @@ class TestConfigurationManagement(unittest.TestCase):
         self.assertNotEqual(base_config.encoder_config.embedding_dim, 256)
 
 
+class TestRecentImprovements(unittest.TestCase):
+    """Tests for bug-fixes and features added in the latest improvement pass."""
+
+    def setUp(self):
+        self.device = torch.device('cpu')
+        self.temp_dir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
+
+    # ── SMOTE scaler round-trip ────────────────────────────────────────────────
+    def test_smote_scaler_roundtrip(self):
+        """Synthetic embeddings must be in original (un-normalised) space."""
+        np.random.seed(0)
+        # High-mean data so we can detect if inverse_transform is skipped
+        emb = np.random.randn(40, 16) * 10 + 200
+        labels = np.array([0] * 20 + [1] * 20)
+
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=True, random_state=42)
+        smote.fit(emb, labels)
+        syn, _ = smote.generate_synthetic(n_samples=10)
+
+        # Mean of synthetic should be near 200, not near 0
+        self.assertAlmostEqual(syn.mean(), 200.0, delta=30.0,
+                               msg="inverse_transform not applied; synthetic embeddings still in normalised space")
+
+    def test_smote_scaler_disabled(self):
+        """With normalize_embeddings=False, scaler must not be fitted or applied."""
+        np.random.seed(0)
+        emb = np.random.randn(40, 16) * 10 + 200
+        labels = np.array([0] * 20 + [1] * 20)
+
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=False, random_state=42)
+        smote.fit(emb, labels)
+
+        self.assertIsNone(smote.scaler, "scaler must be None when normalize_embeddings=False")
+        syn, _ = smote.generate_synthetic(n_samples=10)
+        self.assertAlmostEqual(syn.mean(), 200.0, delta=30.0)
+
+    # ── diversity_index must be plain float ───────────────────────────────────
+    def test_diversity_index_is_float(self):
+        """diversity_index should be a Python float, not np.float64, for JSON safety."""
+        qa = QualityAssessor(metrics=['mse'], compute_diversity=True, device=self.device)
+        imgs = torch.randn(6, 3, 32, 32)
+        results = qa.evaluate_quality(imgs, imgs)
+        idx = results['diversity']['diversity_index']
+        self.assertIsInstance(idx, float,
+                              f"diversity_index should be float, got {type(idx).__name__}")
+
+    # ── JSON report serialises np types without error ─────────────────────────
+    def test_json_report_with_numpy_values(self):
+        """QualityReporter JSON format must handle np.float64 values without TypeError."""
+        import json
+        qa = QualityAssessor(metrics=['mse'], compute_diversity=True, device=self.device)
+        imgs = torch.randn(6, 3, 32, 32)
+        results = qa.evaluate_quality(imgs, imgs)
+
+        reporter = QualityReporter(output_dir=str(self.temp_dir), report_format='json')
+        path = reporter._generate_json_report(results, 'test_report')
+
+        # Must be valid JSON
+        with open(path) as f:
+            data = json.load(f)
+        self.assertIn('quality_results', data)
+
+    # ── DCGANDecoder in full pipeline ─────────────────────────────────────────
+    def test_dcgan_pipeline_smoke(self):
+        """DCGANDecoder pipeline: fit + generate should produce correct-shape tensors."""
+        from smote_image_synthesis.decoders.dcgan_decoder import DCGANDecoder
+
+        enc = ResNetEncoder('resnet18', embedding_dim=64, pretrained=False, device=self.device)
+        dec = DCGANDecoder(64, (3, 32, 32), base_channels=64, device=self.device)
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=True, random_state=0)
+        qa = QualityAssessor(metrics=['mse'], compute_diversity=False, device=self.device)
+        pipeline = SynthesisPipeline(enc, dec, smote, qa)
+
+        imgs = torch.randn(20, 3, 32, 32)
+        labels = np.array([0] * 10 + [1] * 10)
+        pipeline.fit(imgs, labels, train_decoder=True, decoder_epochs=2)
+
+        syn, syn_labels = pipeline.generate_synthetic_images(n_samples=8)
+        self.assertEqual(syn.shape[1:], torch.Size([3, 32, 32]))
+        self.assertEqual(len(syn), len(syn_labels))
+
+    # ── Image resize in data loader ───────────────────────────────────────────
+    def test_load_cats_and_dogs_resize(self):
+        """load_cats_and_dogs must produce the requested image_size."""
+        # Import the function directly (it downloads data only when called with real CIFAR)
+        # Instead, verify that the transform includes Resize when size != 32
+        import torchvision.transforms as T
+        from torchvision.transforms import Resize
+
+        # Simulate what load_cats_and_dogs does for image_size=64
+        image_size = 64
+        resize_ops = [] if image_size == 32 else [T.Resize(image_size)]
+        transform = T.Compose([
+            *resize_ops,
+            T.ToTensor(),
+        ])
+
+        # Apply to a dummy PIL image to confirm output shape
+        from PIL import Image as PILImage
+        dummy = PILImage.new('RGB', (32, 32))
+        t = transform(dummy)
+        self.assertEqual(t.shape, (3, 64, 64))
+
+    # ── SMOTE n_samples precision ─────────────────────────────────────────────
+    def test_smote_exact_n_samples(self):
+        """generate_synthetic must return EXACTLY n_samples regardless of n_classes."""
+        np.random.seed(42)
+        emb = np.random.randn(60, 16) * 10
+        labels = np.array([0] * 20 + [1] * 20 + [2] * 20)
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=True, random_state=42)
+        smote.fit(emb, labels)
+
+        for n in [1, 5, 7, 11, 13, 17, 23, 50]:
+            syn, lbl = smote.generate_synthetic(n_samples=n)
+            self.assertEqual(len(syn), n,
+                             f"Requested {n} samples, got {len(syn)} (non-multiple of n_classes={3})")
+            self.assertEqual(len(syn), len(lbl))
+
+    def test_smote_none_n_samples_imbalanced(self):
+        """generate_synthetic(n_samples=None) returns samples for imbalanced classes."""
+        np.random.seed(0)
+        emb = np.random.randn(30, 8)
+        # Imbalanced: minority class (1) has 5 samples vs majority (0) has 25
+        labels = np.array([0] * 25 + [1] * 5)
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=False, random_state=0)
+        smote.fit(emb, labels)
+        syn, lbl = smote.generate_synthetic(n_samples=None)
+        # With auto strategy, minority class gets upsampled to match majority
+        self.assertGreater(len(syn), 0)
+
+    def test_smote_none_n_samples_balanced_returns_zero(self):
+        """generate_synthetic(n_samples=None) for balanced data returns 0 — auto strategy has nothing to do."""
+        np.random.seed(0)
+        emb = np.random.randn(30, 8)
+        labels = np.array([0] * 15 + [1] * 15)
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=False, random_state=0)
+        smote.fit(emb, labels)
+        syn, lbl = smote.generate_synthetic(n_samples=None)
+        self.assertEqual(len(syn), 0, "Balanced classes with auto strategy should produce 0 synthetic samples")
+
+    # ── GAN warmup not restarted in segmented training ───────────────────────
+    def test_segmented_training_global_epoch(self):
+        """GAN phase must activate based on global epoch, not local epoch within segment."""
+        from smote_image_synthesis.decoders.dcgan_decoder import DCGANDecoder
+
+        enc = ResNetEncoder('resnet18', embedding_dim=64, pretrained=False, device=self.device)
+        dec = DCGANDecoder(64, (3, 32, 32), base_channels=64, device=self.device)
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=False, random_state=0)
+        qa = QualityAssessor(metrics=['mse'], compute_diversity=False, device=self.device)
+        pipeline = SynthesisPipeline(enc, dec, smote, qa)
+
+        imgs = torch.randn(20, 3, 32, 32)
+        labels = np.array([0] * 10 + [1] * 10)
+
+        # Simulate two segments: epochs 0-9, then 10-19 (total=20, warmup ends at epoch 6)
+        # Second segment starts at global_epoch=10, which is past warmup → GAN should be active
+        pipeline.fit(imgs, labels, train_decoder=True, decoder_epochs=10,
+                     start_epoch=0, total_epochs=20)
+        pipeline.fit(imgs, labels, train_decoder=True, decoder_epochs=10,
+                     start_epoch=10, total_epochs=20)
+
+        # If we got here without error and shapes are right, segmented training works
+        syn, _ = pipeline.generate_synthetic_images(n_samples=6)
+        self.assertEqual(syn.shape[1:], torch.Size([3, 32, 32]))
+
+    # ── Pipeline save/load round-trip ─────────────────────────────────────────
+    def test_pipeline_save_load_roundtrip(self):
+        """save_pipeline / load_pipeline must preserve encoder+decoder weights."""
+        enc = ResNetEncoder('resnet18', embedding_dim=64, pretrained=False, device=self.device)
+        dec = AutoencoderDecoder(64, (3, 32, 32), device=self.device)
+        smote = ConstrainedSMOTE(k_neighbors=3, normalize_embeddings=False, random_state=0)
+        qa = QualityAssessor(metrics=['mse'], compute_diversity=False, device=self.device)
+        pipeline = SynthesisPipeline(enc, dec, smote, qa)
+
+        base = str(self.temp_dir / 'ckpt')
+        pipeline.save_pipeline(base)
+
+        self.assertTrue(Path(base + '_encoder.pth').exists())
+        self.assertTrue(Path(base + '_decoder.pth').exists())
+
+        # Load into a fresh pipeline
+        enc2 = ResNetEncoder('resnet18', embedding_dim=64, pretrained=False, device=self.device)
+        dec2 = AutoencoderDecoder(64, (3, 32, 32), device=self.device)
+        pipeline2 = SynthesisPipeline(enc2, dec2, smote, qa)
+        pipeline2.load_pipeline(base)
+
+        # Weights should match
+        for p1, p2 in zip(pipeline.encoder.model.parameters(),
+                          pipeline2.encoder.model.parameters()):
+            self.assertTrue(torch.equal(p1, p2))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

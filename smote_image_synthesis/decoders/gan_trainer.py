@@ -452,7 +452,7 @@ class GANTrainer:
     
     def load_checkpoint(self, checkpoint_path: str) -> None:
         """Load training checkpoint."""
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         
         self.current_epoch = checkpoint['epoch']
         self.gan_decoder.generator.load_state_dict(checkpoint['generator_state_dict'])

@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 import json
-import pickle
 from pathlib import Path
 
 
@@ -142,16 +141,23 @@ class EmbeddingData:
     
     def save_to_file(self, filepath: str) -> None:
         """
-        Save embedding data to file using pickle for numpy array preservation.
-        
+        Save embedding data to file using numpy+JSON (safe, no pickle).
+
         Args:
             filepath: Path to save the embedding data
         """
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(filepath, 'wb') as f:
-            pickle.dump(self, f)
+        import json as _json
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        arr = self.embedding if self.embedding is not None else np.array([])
+        np.savez(str(path), embedding=arr)
+        meta = {
+            'label': self.label,
+            'source_image_id': self.source_image_id,
+            'metadata': self.metadata,
+            'timestamp': self.timestamp.isoformat(),
+        }
+        Path(str(path) + '.npz.meta.json').write_text(_json.dumps(meta))
     
     @classmethod
     def load_from_file(cls, filepath: str) -> 'EmbeddingData':
@@ -164,9 +170,24 @@ class EmbeddingData:
         Returns:
             EmbeddingData instance
         """
-        with open(filepath, 'rb') as f:
-            return pickle.load(f)
-    
+        # Use numpy safe load instead of pickle to prevent arbitrary code execution
+        path = Path(filepath)
+        # np.savez appends .npz automatically; resolve the actual path
+        npz_path = path if path.suffix == '.npz' else Path(str(path) + '.npz')
+        npz = np.load(str(npz_path), allow_pickle=False)
+        import json as _json
+        meta_path = Path(str(npz_path) + '.meta.json')
+        meta = _json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        embedding = npz['embedding'] if 'embedding' in npz else None
+        timestamp = datetime.fromisoformat(meta.get('timestamp', datetime.now().isoformat()))
+        return cls(
+            embedding=embedding,
+            label=meta.get('label'),
+            source_image_id=meta.get('source_image_id'),
+            metadata=meta.get('metadata', {}),
+            timestamp=timestamp,
+        )
+
     def save_metadata_json(self, filepath: str) -> None:
         """
         Save only metadata to JSON file (excluding embedding array).
@@ -343,16 +364,28 @@ class SyntheticSample:
     
     def save_to_file(self, filepath: str) -> None:
         """
-        Save synthetic sample to file using pickle.
-        
+        Save synthetic sample to file using numpy+JSON (safe, no pickle).
+
         Args:
             filepath: Path to save the synthetic sample
         """
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(filepath, 'wb') as f:
-            pickle.dump(self, f)
+        import json as _json
+        path = Path(filepath)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        arrays = {}
+        if self.generated_image is not None:
+            arrays['generated_image'] = self.generated_image
+        arrays['synthetic_embedding'] = self.synthetic_embedding
+        arrays['interpolation_weights'] = self.interpolation_weights
+        np.savez(str(path), **arrays)
+        meta = {
+            'parent_embeddings': self.parent_embeddings,
+            'quality_score': self.quality_score,
+            'decoder_type': self.decoder_type,
+            'generation_metadata': self.generation_metadata,
+            'generation_timestamp': self.generation_timestamp.isoformat(),
+        }
+        Path(str(path) + '.npz.meta.json').write_text(_json.dumps(meta))
     
     @classmethod
     def load_from_file(cls, filepath: str) -> 'SyntheticSample':
@@ -365,8 +398,27 @@ class SyntheticSample:
         Returns:
             SyntheticSample instance
         """
-        with open(filepath, 'rb') as f:
-            return pickle.load(f)
+        path = Path(filepath)
+        npz_path = path if path.suffix == '.npz' else Path(str(path) + '.npz')
+        npz = np.load(str(npz_path), allow_pickle=False)
+        import json as _json
+        meta_path = Path(str(npz_path) + '.meta.json')
+        meta = _json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        generated_image = npz['generated_image'] if 'generated_image' in npz else None
+        synthetic_embedding = npz['synthetic_embedding']
+        interpolation_weights = npz['interpolation_weights']
+        from datetime import datetime as _dt
+        ts = meta.get('generation_timestamp', _dt.now().isoformat())
+        return cls(
+            synthetic_embedding=synthetic_embedding,
+            generated_image=generated_image,
+            parent_embeddings=meta.get('parent_embeddings', []),
+            interpolation_weights=interpolation_weights,
+            quality_score=meta.get('quality_score', 0.0),
+            decoder_type=meta.get('decoder_type', ''),
+            generation_metadata=meta.get('generation_metadata', {}),
+            generation_timestamp=_dt.fromisoformat(ts),
+        )
 
 
 @dataclass

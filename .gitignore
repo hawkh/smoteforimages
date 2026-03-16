@@ -1,0 +1,39 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Checkpoints and model weights
+checkpoints/
+*.pth
+*.pt
+*.h5
+
+# Generated output
+demo_output/
+dogs_cats_output/
+synthetic_output/
+
+# Data directories
+data/
+
+# Documentation generated files
+docs/patent/
+
+# Claude settings
+.claude/
+
+# Web files
+*.webp

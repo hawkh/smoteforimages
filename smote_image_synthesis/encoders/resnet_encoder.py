@@ -6,12 +6,23 @@ from typing import Dict, Any, Optional, Union
 from pathlib import Path
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as transforms
 import logging
 import json
 
 from .base import ImageEncoder
+
+
+class _L2Normalize(nn.Module):
+    """Project embedding onto the unit hypersphere (L2 normalisation).
+
+    When enabled, the encoder output has unit norm which makes SLERP
+    interpolation in the embedding space perfectly geodesic.
+    """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.normalize(x, p=2, dim=1)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +40,12 @@ class ResNetEncoder(ImageEncoder):
         'resnet50': models.resnet50,
         'resnet101': models.resnet101
     }
+
+    _WEIGHTS_MAP = {
+        'resnet18':  'ResNet18_Weights',
+        'resnet50':  'ResNet50_Weights',
+        'resnet101': 'ResNet101_Weights',
+    }
     
     def __init__(
         self,
@@ -38,7 +55,8 @@ class ResNetEncoder(ImageEncoder):
         device: Optional[torch.device] = None,
         config: Optional[Dict[str, Any]] = None,
         freeze_backbone: bool = False,
-        dropout_rate: float = 0.1
+        dropout_rate: float = 0.1,
+        normalize_output: bool = True,
     ):
         """
         Initialize ResNet encoder.
@@ -62,7 +80,8 @@ class ResNetEncoder(ImageEncoder):
         config = config or {}
         config.update({
             'freeze_backbone': freeze_backbone,
-            'dropout_rate': dropout_rate
+            'dropout_rate': dropout_rate,
+            'normalize_output': normalize_output,
         })
         
         super().__init__(
@@ -93,19 +112,22 @@ class ResNetEncoder(ImageEncoder):
         Returns:
             Complete ResNet encoder model
         """
-        # Load base ResNet model
+        # Load base ResNet model using the non-deprecated weights API
         resnet_class = self.SUPPORTED_ARCHITECTURES[self.architecture]
         if self.pretrained:
             try:
-                backbone = resnet_class(pretrained=True)
+                weights_name = self._WEIGHTS_MAP[self.architecture]
+                weights_cls = getattr(models, weights_name)
+                weights = weights_cls.IMAGENET1K_V1
+                backbone = resnet_class(weights=weights)
             except Exception as exc:
                 logger.warning(
                     "Failed to load pretrained weights (%s). Falling back to random initialization.",
                     exc,
                 )
-                backbone = resnet_class(pretrained=False)
+                backbone = resnet_class(weights=None)
         else:
-            backbone = resnet_class(pretrained=False)
+            backbone = resnet_class(weights=None)
         
         # Get the number of features from the last layer
         num_features = backbone.fc.in_features
@@ -159,7 +181,12 @@ class ResNetEncoder(ImageEncoder):
         else:
             logger.warning(f"Unknown activation: {activation}, using ReLU")
             layers.append(nn.ReLU(inplace=True))
-        
+
+        # Optional L2 normalisation — projects output onto unit hypersphere.
+        # Recommended when using SLERP interpolation in the embedding space.
+        if self.config.get('normalize_output', True):
+            layers.append(_L2Normalize())
+
         return nn.Sequential(*layers)
     
     def _freeze_backbone(self) -> None:

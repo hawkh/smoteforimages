@@ -165,10 +165,10 @@ class QualityAssessor:
             results['std_pairwise_distance'] = float(np.std(upper_triangle))
             results['min_pairwise_distance'] = float(np.min(upper_triangle))
             results['max_pairwise_distance'] = float(np.max(upper_triangle))
-            
+
             # Compute diversity index (normalized)
             mean_dist = results['mean_pairwise_distance']
-            max_possible_dist = np.sqrt(np.prod(images.shape[1:]))  # Theoretical max
+            max_possible_dist = float(np.sqrt(np.prod(images.shape[1:])))  # Theoretical max
             results['diversity_index'] = mean_dist / max_possible_dist if max_possible_dist > 0 else 0.0
         else:
             results = {
@@ -249,12 +249,20 @@ class QualityAssessor:
         # Compute FID
         mu1, sigma1 = np.mean(synthetic_features, axis=0), np.cov(synthetic_features, rowvar=False)
         mu2, sigma2 = np.mean(real_features, axis=0), np.cov(real_features, rowvar=False)
-        
+
+        # Regularize covariance matrices for numerical stability
+        # (rank-deficient when n_samples < n_features)
+        eps = 1e-6
+        sigma1 += np.eye(sigma1.shape[0]) * eps
+        sigma2 += np.eye(sigma2.shape[0]) * eps
+
         # Calculate FID
         diff = mu1 - mu2
         covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
-        
+
         if np.iscomplexobj(covmean):
+            if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+                logger.warning("FID: large imaginary component; result may be inaccurate")
             covmean = covmean.real
         
         fid = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2 * covmean)
@@ -312,7 +320,10 @@ class QualityAssessor:
             batch = images[i:i + self.fid_batch_size].to(self.device)
             
             with torch.no_grad():
+                self.inception_model.eval()  # enforce eval mode every batch
                 batch_features = self.inception_model(batch)
+                if isinstance(batch_features, tuple):
+                    batch_features = batch_features[0]
                 features.append(batch_features.cpu().numpy())
         
         return np.concatenate(features, axis=0)

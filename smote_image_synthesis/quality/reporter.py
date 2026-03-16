@@ -553,11 +553,21 @@ Distribution Similarity:
             'timestamp': datetime.now().isoformat(),
             'quality_results': quality_results
         }
-        
+
+        class _NumpyEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, np.floating):
+                    return float(obj)
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                if isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                return super().default(obj)
+
         report_path = self.output_dir / f"{report_name}.json"
         with open(report_path, 'w') as f:
-            json.dump(report_data, f, indent=2)
-        
+            json.dump(report_data, f, indent=2, cls=_NumpyEncoder)
+
         return report_path
     
     def _generate_text_report(self, quality_results: Dict[str, Any], report_name: str) -> Path:

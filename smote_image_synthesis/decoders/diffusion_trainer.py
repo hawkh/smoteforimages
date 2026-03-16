@@ -173,6 +173,7 @@ class DiffusionTrainer:
             scheduler = None
         
         # Setup checkpoint directory
+        checkpoint_path = None
         if checkpoint_dir:
             checkpoint_path = Path(checkpoint_dir)
             checkpoint_path.mkdir(parents=True, exist_ok=True)
@@ -422,7 +423,7 @@ class DiffusionTrainer:
     
     def load_checkpoint(self, checkpoint_path: str) -> None:
         """Load training checkpoint."""
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         
         self.current_epoch = checkpoint['epoch']
         self.diffusion_decoder.unet.load_state_dict(checkpoint['model_state_dict'])

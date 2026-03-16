@@ -352,7 +352,7 @@ class AutoencoderTrainer:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
         
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         
         # Load model state
         self.decoder.model.load_state_dict(checkpoint['model_state_dict'])
@@ -455,7 +455,7 @@ class PerceptualLoss(nn.Module):
                 self.layers = ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3']
             else:
                 self.layers = layers
-            
+
             # VGG layer mapping
             self.layer_name_mapping = {
                 'relu1_1': 1, 'relu1_2': 3,
@@ -464,6 +464,11 @@ class PerceptualLoss(nn.Module):
                 'relu4_1': 18, 'relu4_2': 20, 'relu4_3': 22,
                 'relu5_1': 25, 'relu5_2': 27, 'relu5_3': 29
             }
+            # Precompute target layer indices once — avoids O(N²) rebuild each forward pass
+            self._target_layer_indices = frozenset(
+                self.layer_name_mapping[n] for n in self.layers
+                if n in self.layer_name_mapping
+            )
             
             # Normalization for VGG
             self.normalize = transforms.Normalize(
@@ -510,10 +515,8 @@ class PerceptualLoss(nn.Module):
     def _extract_features(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Extract features from specified VGG layers."""
         features = []
-        
         for i, layer in enumerate(self.vgg):
             x = layer(x)
-            if i in [self.layer_name_mapping[layer_name] for layer_name in self.layers if layer_name in self.layer_name_mapping]:
+            if i in self._target_layer_indices:
                 features.append(x)
-        
         return features

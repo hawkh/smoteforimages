@@ -84,20 +84,13 @@ class AutoencoderDecoder(BaseDecoder):
         logger.info(f"Initialized AutoencoderDecoder with embedding_dim={embedding_dim}, image_shape={image_shape}")
     
     def _get_default_hidden_dims(self) -> List[int]:
-        """Generate default hidden dimensions based on embedding and image size."""
-        c, h, w = self.image_shape
-        target_size = c * h * w
-        
-        # Use simple default dimensions to avoid memory issues
+        """Generate default hidden dimensions based on embedding dimension."""
         if self.embedding_dim <= 128:
             return [256, 512]
         elif self.embedding_dim <= 256:
             return [512, 1024]
         else:
             return [1024, 2048]
-        
-        # Fallback for very large embeddings
-        return [self.embedding_dim * 2, self.embedding_dim * 4]
     
     def _build_model(self) -> nn.Module:
         """Build the autoencoder decoder model."""

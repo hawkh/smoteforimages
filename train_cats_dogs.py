@@ -26,10 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision.transforms as transforms
-from torchvision.datasets import CIFAR10, STL10
-
-# Suppress torchvision's pretrained= deprecation warnings from existing code
-warnings.filterwarnings('ignore', category=UserWarning, module='torchvision')
+from torchvision.datasets import CIFAR10
 
 from smote_image_synthesis.encoders.resnet_encoder import ResNetEncoder
 from smote_image_synthesis.decoders.autoencoder_decoder import AutoencoderDecoder
@@ -37,6 +34,8 @@ from smote_image_synthesis.decoders.dcgan_decoder import DCGANDecoder
 from smote_image_synthesis.smote.constrained_smote import ConstrainedSMOTE
 from smote_image_synthesis.quality.assessor import QualityAssessor
 from smote_image_synthesis.pipeline import SynthesisPipeline
+
+warnings.filterwarnings('ignore', category=UserWarning, module='torchvision')
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -47,11 +46,7 @@ logging.basicConfig(
 logger = logging.getLogger('train_cats_dogs')
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-IMAGE_SIZE   = 32   # native CIFAR-10 resolution — no blur from upscaling
-# STL-10 class indices for cats/dogs
-STL_CAT      = 3
-STL_DOG      = 5
-# CIFAR-10 fallback
+DEFAULT_IMAGE_SIZE = 32   # CIFAR-10 native resolution
 CIFAR_CAT    = 3
 CIFAR_DOG    = 5
 CLASS_NAMES  = {0: 'cat', 1: 'dog'}
@@ -61,17 +56,19 @@ DATA_DIR     = Path('data')
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-def load_cats_and_dogs(n_per_class: int) -> tuple:
-    """Load STL-10 cats & dogs (native 96×96, downscaled to IMAGE_SIZE).
-    Falls back to CIFAR-10 if STL-10 download fails."""
-    # No Resize needed — CIFAR-10 is natively IMAGE_SIZE×IMAGE_SIZE
+def load_cats_and_dogs(n_per_class: int, image_size: int = DEFAULT_IMAGE_SIZE) -> tuple:
+    """Load CIFAR-10 cats & dogs, optionally resizing to image_size."""
+    resize_ops = []
+    if image_size != 32:
+        resize_ops = [transforms.Resize(image_size)]
     transform = transforms.Compose([
+        *resize_ops,
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
-    logger.info("Loading CIFAR-10 (train+test splits, native 32×32)...")
+    logger.info(f"Loading CIFAR-10 (train+test splits, output {image_size}×{image_size})...")
     train_ds = CIFAR10(root=str(DATA_DIR), train=True,  download=True, transform=transform)
     test_ds  = CIFAR10(root=str(DATA_DIR), train=False, download=True, transform=transform)
     cat_idx, dog_idx = CIFAR_CAT, CIFAR_DOG
@@ -89,7 +86,7 @@ def load_cats_and_dogs(n_per_class: int) -> tuple:
 
     images = torch.stack(images_list)
     labels = np.array(labels_list)
-    logger.info(f"  {counts[0]} cats + {counts[1]} dogs = {len(images)} images @ {IMAGE_SIZE}×{IMAGE_SIZE}")
+    logger.info(f"  {counts[0]} cats + {counts[1]} dogs = {len(images)} images @ {image_size}×{image_size}")
     return images, labels
 
 
@@ -155,12 +152,20 @@ def parse_args():
                    help='Training images per class (default: 300)')
     p.add_argument('--epochs', type=int, default=150,
                    help='E2E training epochs (default: 150)')
-    p.add_argument('--image-size', type=int, default=IMAGE_SIZE,
-                   help=f'Image size (default: {IMAGE_SIZE})')
+    p.add_argument('--image-size', type=int, default=DEFAULT_IMAGE_SIZE,
+                   help=f'Image size (default: {DEFAULT_IMAGE_SIZE}). Use 64 for higher res.')
     p.add_argument('--n-synthetic', type=int, default=50,
                    help='Synthetic images to generate (default: 50)')
     p.add_argument('--embedding-dim', type=int, default=512,
                    help='Encoder embedding dimension (default: 512)')
+    p.add_argument('--decoder', choices=['dcgan', 'autoencoder'], default='dcgan',
+                   help='Decoder architecture (default: dcgan)')
+    p.add_argument('--architecture', choices=['resnet18', 'resnet50'], default='resnet18',
+                   help='Encoder backbone (default: resnet18)')
+    p.add_argument('--resume', type=str, default=None, metavar='PATH',
+                   help='Resume from a checkpoint directory (e.g. synthetic_output/ckpt_epoch_50)')
+    p.add_argument('--save-every', type=int, default=0,
+                   help='Save pipeline checkpoint every N epochs (0 = only at end)')
     return p.parse_args()
 
 
@@ -170,9 +175,10 @@ def main():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Device: {device}")
+    image_size = args.image_size
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
-    images, labels = load_cats_and_dogs(args.n_per_class)
+    images, labels = load_cats_and_dogs(args.n_per_class, image_size=image_size)
     save_image_grid(
         images, labels,
         OUTPUT_DIR / 'real_samples.png',
@@ -180,32 +186,45 @@ def main():
     )
 
     # ── 2. Build components ───────────────────────────────────────────────────
-    logger.info("Building pipeline components...")
+    logger.info(f"Building pipeline: encoder={args.architecture}, decoder={args.decoder}, "
+                f"image_size={image_size}×{image_size}, emb={args.embedding_dim}")
 
     encoder = ResNetEncoder(
-        architecture='resnet18',
+        architecture=args.architecture,
         embedding_dim=args.embedding_dim,
         pretrained=True,
         device=device,
-        freeze_backbone=False,  # Joint E2E training will update the whole encoder
+        freeze_backbone=False,
+        normalize_output=True,   # L2-normalise → unit hypersphere for ideal SLERP
     )
 
-    decoder = DCGANDecoder(
-        embedding_dim=args.embedding_dim,
-        image_shape=(3, IMAGE_SIZE, IMAGE_SIZE),
-        base_channels=512,   # 7M params → sharper details
-        device=device,
-    )
+    if args.decoder == 'dcgan':
+        decoder = DCGANDecoder(
+            embedding_dim=args.embedding_dim,
+            image_shape=(3, image_size, image_size),
+            base_channels=512,
+            num_classes=2,            # class-conditional: cats (0) vs dogs (1)
+            class_embed_dim=64,
+            use_self_attention=True,  # SAGAN-style attention at 16×16
+            device=device,
+        )
+    else:
+        from smote_image_synthesis.decoders.autoencoder_decoder import AutoencoderDecoder
+        decoder = AutoencoderDecoder(
+            embedding_dim=args.embedding_dim,
+            image_shape=(3, image_size, image_size),
+            device=device,
+        )
 
     smote = ConstrainedSMOTE(
         k_neighbors=5,
         sampling_strategy='auto',
         use_clustering=True,
-        normalize_embeddings=True,
+        normalize_embeddings=False,  # Encoder already L2-normalises; skip StandardScaler
+        use_slerp=True,              # Geodesic interpolation on embedding hypersphere
         random_state=42,
     )
 
-    # Lightweight assessor — MSE/PSNR only, no InceptionV3 download needed
     quality_assessor = QualityAssessor(
         metrics=['mse', 'psnr'],
         compute_diversity=True,
@@ -218,18 +237,62 @@ def main():
         quality_assessor=quality_assessor,
     )
 
-    # ── 3. Train ──────────────────────────────────────────────────────────────
-    logger.info(f"Training decoder for {args.epochs} epochs "
-                f"on {len(images)} images...")
-    pipeline.fit(
-        images=images.to(device),
-        labels=labels,
-        train_decoder=True,
-        decoder_epochs=args.epochs,
-    )
-    logger.info("Training complete.")
+    # ── 3. Resume from checkpoint if requested ────────────────────────────────
+    start_epoch = 0
+    if args.resume:
+        ckpt_path = Path(args.resume)
+        if ckpt_path.exists():
+            logger.info(f"Resuming from checkpoint: {ckpt_path}")
+            pipeline.load_pipeline(str(ckpt_path))
+            # Infer epoch from directory name if it follows ckpt_epoch_N pattern
+            try:
+                start_epoch = int(ckpt_path.name.split('_')[-1])
+                logger.info(f"  Resuming from epoch {start_epoch}")
+            except ValueError:
+                pass
+        else:
+            logger.warning(f"Checkpoint not found: {ckpt_path}. Starting from scratch.")
 
-    # ── 4. Generate synthetic images ──────────────────────────────────────────
+    remaining_epochs = max(0, args.epochs - start_epoch)
+    if remaining_epochs == 0:
+        logger.info("Training already complete (start_epoch >= epochs). Skipping.")
+    else:
+        # ── 4. Train ──────────────────────────────────────────────────────────
+        if args.save_every > 0:
+            # Train in segments, saving a checkpoint after each segment.
+            # start_epoch + total_epochs are passed so the LR schedule and
+            # GAN warmup phase are computed against the full training run.
+            epoch_cursor = start_epoch
+            while epoch_cursor < args.epochs:
+                segment = min(args.save_every, args.epochs - epoch_cursor)
+                logger.info(f"Training epochs {epoch_cursor}–{epoch_cursor + segment - 1} "
+                            f"/ {args.epochs} total...")
+                pipeline.fit(
+                    images=images.to(device),
+                    labels=labels,
+                    train_decoder=True,
+                    decoder_epochs=segment,
+                    start_epoch=epoch_cursor,
+                    total_epochs=args.epochs,
+                )
+                epoch_cursor += segment
+                ckpt_dir = OUTPUT_DIR / f'ckpt_epoch_{epoch_cursor}'
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                pipeline.save_pipeline(str(ckpt_dir / 'cats_dogs_pipeline'))
+                logger.info(f"  Checkpoint saved → {ckpt_dir}")
+        else:
+            logger.info(f"Training for {remaining_epochs} epochs on {len(images)} images...")
+            pipeline.fit(
+                images=images.to(device),
+                labels=labels,
+                train_decoder=True,
+                decoder_epochs=remaining_epochs,
+                start_epoch=start_epoch,
+                total_epochs=args.epochs,
+            )
+        logger.info("Training complete.")
+
+    # ── 5. Generate synthetic images ──────────────────────────────────────────
     logger.info(f"Generating {args.n_synthetic} synthetic images via SMOTE...")
     synthetic_images, synthetic_labels = pipeline.generate_synthetic_images(
         n_samples=args.n_synthetic
@@ -250,14 +313,14 @@ def main():
         title=f'SMOTE-Synthetic Cats & Dogs (n={len(synthetic_images)})',
     )
 
-    # ── 5. Comparison grid ────────────────────────────────────────────────────
+    # ── 6. Comparison grid ────────────────────────────────────────────────────
     save_comparison(
         images, labels,
         synthetic_images, synthetic_labels,
         OUTPUT_DIR / 'comparison.png',
     )
 
-    # ── 6. Quick quality report ───────────────────────────────────────────────
+    # ── 7. Quick quality report ───────────────────────────────────────────────
     logger.info("Computing quality metrics...")
     n_eval = min(len(synthetic_images), len(images))
     try:
@@ -272,7 +335,7 @@ def main():
     except Exception as e:
         logger.warning(f"Quality evaluation skipped: {e}")
 
-    # ── 7. Save pipeline weights ──────────────────────────────────────────────
+    # ── 8. Save final pipeline weights ───────────────────────────────────────
     pipeline.save_pipeline(str(OUTPUT_DIR / 'cats_dogs_pipeline'))
 
     logger.info("\n" + "=" * 50)
