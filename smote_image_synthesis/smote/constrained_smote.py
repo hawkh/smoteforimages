@@ -363,17 +363,31 @@ class ConstrainedSMOTE:
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
-        valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        valid_mask = np.zeros(len(synthetic_embeddings), dtype=bool)
+        unique_labels = np.unique(synthetic_labels)
 
-        if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            if not np.any(syn_mask):
+                continue
+
+            real_mask = self.labels == label
+            label_embeddings = self.embeddings[real_mask]
+
+            if len(label_embeddings) > 0:
+                # ⚡ Bolt: Vectorized minimum distance lookup replaces slow
+                # iterative approach. O(N log M) instead of O(N * M) per class
+                nbrs = NearestNeighbors(n_neighbors=1, algorithm='auto')
+                nbrs.fit(label_embeddings)
+                syn_embs = synthetic_embeddings[syn_mask]
+                distances, _ = nbrs.kneighbors(syn_embs)
+
+                is_valid = distances.flatten() <= self.max_distance_threshold
+                valid_mask[syn_mask] = is_valid
+
+        if np.any(valid_mask):
+            syn_embs = synthetic_embeddings[valid_mask]
+            return syn_embs, synthetic_labels[valid_mask]
         return np.array([]), np.array([])
 
     def _validate_input_data(
