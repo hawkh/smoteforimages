@@ -165,17 +165,23 @@ class SynthesisPipeline:
         global_start_epoch: int = 0,
         global_total_epochs: int = 0,
         labels: Optional[torch.Tensor] = None,
+        lambda_repulse: float = 0.01,
+        repulse_margin: float = 0.3,
     ) -> None:
         """
         Train encoder and decoder jointly end-to-end.
 
         Phase 1 (first 30% of global epochs): reconstruction only (MSE+L1+perceptual)
-        Phase 2 (remaining 70%): adds WGAN-GP discriminator for sharpness.
+        Phase 2 (remaining 70%): WGAN-GP discriminator + feature matching.
 
-        Improvements applied automatically:
+        Improvements:
         - Class-conditional generation when decoder.num_classes > 0
-        - EMA of decoder weights applied at end for smoother inference
-        - Feature matching loss against discriminator intermediate features
+        - Projection discriminator (Miyato & Koyama 2018) for class-conditional scoring
+        - Spectral normalisation on all discriminator conv layers (SN + GP hybrid)
+        - Multi-scale feature matching at 3 discriminator depths [0.1, 0.3, 0.6]
+        - Intra-class diversity repulsion loss to prevent per-class mode collapse
+        - Adaptive λ_adv via EMA-smoothed Wasserstein distance monitoring
+        - EMA of encoder+decoder applied at end for smoother inference
         """
         import logging
         from torch.utils.data import DataLoader, TensorDataset
@@ -216,20 +222,27 @@ class SynthesisPipeline:
             use_perceptual = False
             _logger.info(f"  Perceptual loss: unavailable ({e}), using MSE+L1 only")
 
-        # Build discriminator for GAN mode
+        # Build discriminator with SN + optional projection head
         disc = None
         opt_disc = None
         if use_gan:
-            disc = self._build_discriminator(self.decoder.image_shape, base_channels=64).to(device)
+            n_classes_disc = getattr(self.decoder, 'num_classes', 0) if use_cond else 0
+            disc = self._build_discriminator(
+                self.decoder.image_shape,
+                base_channels=64,
+                num_classes=n_classes_disc,
+            ).to(device)
             opt_disc = optim.Adam(disc.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-            _logger.info("  GAN discriminator: enabled (WGAN-GP + feature matching)")
+            cond_disc_str = f" + projection discriminator ({n_classes_disc} classes)" if n_classes_disc > 0 else ""
+            _logger.info(
+                f"  GAN discriminator: enabled (SN + WGAN-GP + multi-scale FM{cond_disc_str})"
+            )
 
         # EMA of encoder+decoder parameters for smoother inference
         ema_dec = _EMA(self.decoder.model, decay=0.9999)
         ema_enc = _EMA(self.encoder.model, decay=0.9999)
         _logger.info("  EMA: enabled for encoder+decoder (decay=0.9999)")
 
-        # Warmup threshold is global so segments don't restart the recon-only phase
         recon_epochs_global = max(1, int(g_total * 0.3))
         cond_str = f", class-conditional ({self.decoder.num_classes} classes)" if use_cond else ""
         _logger.info(
@@ -239,11 +252,7 @@ class SynthesisPipeline:
             + cond_str
         )
 
-        # DataLoader — include labels when available
-        if labels is not None:
-            dataset = TensorDataset(images, labels.to(device))
-        else:
-            dataset = TensorDataset(images)
+        dataset = TensorDataset(images, labels.to(device)) if labels is not None else TensorDataset(images)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
         self.encoder.model.train()
@@ -251,11 +260,20 @@ class SynthesisPipeline:
         if disc is not None:
             disc.train()
 
-        n_critic = 5  # D steps per G step (standard WGAN-GP per Gulrajani et al.)
+        n_critic = 5  # D steps per G step (standard WGAN-GP)
+
+        # Adaptive λ_adv state
+        W_ema = 0.0
+        W_history: list = []
+        lam_adv_current = 0.05
+        W_window = 10
+        FM_WEIGHTS = [0.1, 0.3, 0.6]
 
         for epoch in range(num_epochs):
             epoch_g_loss = 0.0
             epoch_d_loss = 0.0
+            epoch_W_sum = 0.0
+            n_W_steps = 0
             global_epoch = global_start_epoch + epoch
             adv_active = use_gan and global_epoch >= recon_epochs_global
 
@@ -281,13 +299,15 @@ class SynthesisPipeline:
                                 fake = self.decoder.model(emb_d, batch_labels)
                             else:
                                 fake = self.decoder.model(emb_d)
-                        # WGAN-GP: W-distance = E[D(real)] - E[D(fake)]
-                        d_real = disc(batch_imgs).mean()
-                        d_fake = disc(fake).mean()
-                        # Gradient penalty
+
+                        # Projection discriminator: conditional score
+                        d_real = disc(batch_imgs, batch_labels).mean()
+                        d_fake = disc(fake, batch_labels).mean()
+
+                        # WGAN-GP gradient penalty
                         alpha = torch.rand(bs, 1, 1, 1, device=device)
                         interp = (alpha * batch_imgs + (1 - alpha) * fake).requires_grad_(True)
-                        d_interp = disc(interp)
+                        d_interp = disc(interp, batch_labels)
                         grads = torch.autograd.grad(
                             outputs=d_interp.sum(), inputs=interp,
                             create_graph=True,
@@ -297,6 +317,10 @@ class SynthesisPipeline:
                         d_loss.backward()
                         opt_disc.step()
                         epoch_d_loss += d_loss.item()
+
+                        # Accumulate Wasserstein estimate for adaptive λ_adv
+                        epoch_W_sum += float(d_real.item() - d_fake.item())
+                        n_W_steps += 1
 
                 # ── Generator / encoder+decoder step ──────────────────────────
                 opt_gen.zero_grad()
@@ -313,38 +337,68 @@ class SynthesisPipeline:
                     g_loss = g_loss + 0.05 * perceptual_loss_fn(recon, batch_imgs)
 
                 if adv_active:
-                    # WGAN generator loss: maximise D(fake) = minimise -D(fake)
-                    g_adv = -disc(recon).mean()
-                    frac = (global_epoch - recon_epochs_global) / max(
-                        1, g_total - recon_epochs_global
-                    )
-                    lam_adv = 0.05 + 0.15 * frac  # 0.05 → 0.20 ramp
+                    # WGAN generator loss
+                    g_adv = -disc(recon, batch_labels).mean()
 
-                    # Feature matching loss — discriminator intermediate features
+                    # Multi-scale feature matching: 3 discriminator depths
                     real_feats = disc.get_features(batch_imgs.detach())
                     fake_feats = disc.get_features(recon)
+                    n_scales = len(real_feats)
+                    weights = FM_WEIGHTS[:n_scales] if n_scales <= 3 else [1.0 / n_scales] * n_scales
+                    # Normalise weights to sum to 1
+                    w_sum = sum(weights)
                     fm_loss = sum(
-                        F.l1_loss(f, r.detach())
-                        for f, r in zip(fake_feats, real_feats)
+                        (w / w_sum) * F.l1_loss(f, r.detach())
+                        for w, f, r in zip(weights, fake_feats, real_feats)
                     )
-                    g_loss = g_loss + lam_adv * g_adv + 0.1 * fm_loss
+
+                    g_loss = g_loss + lam_adv_current * g_adv + 0.1 * fm_loss
+
+                    # Intra-class repulsion: prevent per-class mode collapse
+                    if lambda_repulse > 0 and batch_labels is not None:
+                        repulse = self._compute_repulsion_loss(
+                            emb, batch_labels, margin=repulse_margin
+                        )
+                        g_loss = g_loss + lambda_repulse * repulse
 
                 g_loss.backward()
                 torch.nn.utils.clip_grad_norm_(gen_params, max_norm=1.0)
                 opt_gen.step()
                 epoch_g_loss += g_loss.item()
 
-                # Update EMA shadows after every generator step
                 ema_dec.update(self.decoder.model)
                 ema_enc.update(self.encoder.model)
 
             sched_gen.step()
+
+            # ── Adaptive λ_adv update (end of epoch) ──────────────────────────
+            if adv_active and n_W_steps > 0:
+                W_current = epoch_W_sum / n_W_steps
+                W_ema = 0.99 * W_ema + 0.01 * W_current
+                W_history.append(W_ema)
+                if len(W_history) >= W_window:
+                    dW = W_history[-1] - W_history[-W_window]
+                    if dW < -0.01:  # W-distance dropping — GAN improving
+                        lam_adv_current = min(lam_adv_current + 0.005, 0.50)
+                    elif dW > 0.01:  # W-distance rising — GAN struggling
+                        lam_adv_current = max(lam_adv_current - 0.005, 0.01)
+                else:
+                    # Linear ramp during initial GAN warmup
+                    frac = (global_epoch - recon_epochs_global) / max(
+                        1, g_total - recon_epochs_global
+                    )
+                    lam_adv_current = 0.05 + 0.15 * frac
+
             if epoch % 10 == 0 or epoch == num_epochs - 1:
-                d_str = f"  D={epoch_d_loss/(len(loader)*n_critic):.4f}" if adv_active else ""
+                n_batches = max(len(loader), 1)
+                d_str = (
+                    f"  D={epoch_d_loss/(n_batches*n_critic):.4f}"
+                    f"  λ_adv={lam_adv_current:.3f}"
+                ) if adv_active else ""
                 _logger.info(
                     f"  E2E Epoch {global_epoch:>3}/{g_total}: "
-                    f"G={epoch_g_loss/len(loader):.4f}{d_str}"
-                    + (" [GAN+FM]" if adv_active else " [recon]")
+                    f"G={epoch_g_loss/n_batches:.4f}{d_str}"
+                    + (" [GAN+FM+repulse]" if adv_active else " [recon]")
                 )
 
         self.encoder.model.eval()
@@ -352,7 +406,6 @@ class SynthesisPipeline:
         if disc is not None:
             disc.eval()
 
-        # Apply EMA weights to encoder+decoder — yields smoother, higher-quality inference
         ema_dec.apply(self.decoder.model)
         ema_enc.apply(self.encoder.model)
         _logger.info("E2E training complete — EMA weights applied to encoder+decoder")
@@ -363,54 +416,169 @@ class SynthesisPipeline:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_discriminator(image_shape: tuple, base_channels: int = 64):
-        """Build a WGAN-GP discriminator with feature map extraction.
+    def _build_discriminator(
+        image_shape: tuple,
+        base_channels: int = 64,
+        num_classes: int = 0,
+    ) -> nn.Module:
+        """Build a WGAN-GP discriminator with spectral normalisation and optional
+        class-conditional projection head.
 
-        No BatchNorm (GP provides Lipschitz regularisation).
-        ``get_features()`` exposes intermediate activations for feature matching.
+        Design:
+        - Spectral normalisation (SN) on every Conv2d — per-layer Lipschitz-1
+          constraint via power iteration, complementing the global WGAN-GP penalty
+        - Projection discriminator (Miyato & Koyama 2018) when num_classes > 0:
+          score = phi(x) + <V·y, GAP(phi(x))>  where V = class embedding table
+        - Feature extraction at 3 discriminator depths for multi-scale feature matching
+        - No BatchNorm (GP provides Lipschitz regularisation; SN adds per-layer stability)
         """
         c, h, _ = image_shape
         feature_layers: list = []
         in_ch = c
         out_ch = base_channels
         cur = h
+        # Track which LeakyReLU indices mark the 3 feature-extraction checkpoints
+        lrelu_indices: list = []
+        lrelu_count = 0
+
         while cur > 4:
             feature_layers += [
-                nn.Conv2d(in_ch, out_ch, 4, 2, 1, bias=False),
+                torch.nn.utils.spectral_norm(
+                    nn.Conv2d(in_ch, out_ch, 4, 2, 1, bias=False)
+                ),
                 nn.LeakyReLU(0.2, inplace=True),
             ]
+            lrelu_indices.append(lrelu_count)
+            lrelu_count += 1
             in_ch = out_ch
             out_ch = min(out_ch * 2, 512)
             cur //= 2
-        final_layer = nn.Conv2d(in_ch, 1, 4, 1, 0, bias=True)
+
+        final_layer = torch.nn.utils.spectral_norm(
+            nn.Conv2d(in_ch, 1, 4, 1, 0, bias=True)
+        )
+        penultimate_channels = in_ch  # channels entering final_layer
+
+        # Pick 3 evenly-spaced LReLU checkpoints for multi-scale feature matching
+        n_lrelu = len(lrelu_indices)
+        if n_lrelu >= 3:
+            extract_at = {lrelu_indices[0], lrelu_indices[n_lrelu // 2], lrelu_indices[-1]}
+        elif n_lrelu == 2:
+            extract_at = {lrelu_indices[0], lrelu_indices[1]}
+        else:
+            extract_at = set(lrelu_indices)
+
+        _num_classes = num_classes  # captured for closure
 
         class Discriminator(nn.Module):
-            def __init__(self, feat_layers, final):
+            def __init__(self, feat_layers, final, n_classes, penult_ch, feat_idx):
                 super().__init__()
                 self.feat_layers = nn.ModuleList(feat_layers)
                 self.final = final
+                self.extract_at = feat_idx
 
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                for layer in self.feat_layers:
-                    x = layer(x)
-                return self.final(x).view(x.size(0))
+                # Projection discriminator class embedding
+                if n_classes > 0:
+                    self.class_embed = nn.Embedding(n_classes, penult_ch)
+                    nn.init.normal_(self.class_embed.weight, 0.0, 0.02)
+                else:
+                    self.class_embed = None
 
-            def get_features(self, x: torch.Tensor):
-                """Return list of post-activation feature maps for feature matching."""
-                features = []
+            def _penultimate(self, x: torch.Tensor) -> torch.Tensor:
+                lrelu_i = 0
                 for layer in self.feat_layers:
                     x = layer(x)
                     if isinstance(layer, nn.LeakyReLU):
-                        features.append(x)
+                        lrelu_i += 1
+                return x
+
+            def forward(
+                self, x: torch.Tensor, labels: Optional[torch.Tensor] = None
+            ) -> torch.Tensor:
+                feat = self._penultimate(x)
+                score = self.final(feat).view(feat.size(0))
+
+                # Projection: score += <class_embed(y), GAP(feat)>
+                if self.class_embed is not None and labels is not None:
+                    gap = F.adaptive_avg_pool2d(feat, 1).view(feat.size(0), -1)
+                    class_bias = (self.class_embed(labels) * gap).sum(dim=1)
+                    score = score + class_bias
+
+                return score
+
+            def get_features(self, x: torch.Tensor):
+                """Return feature maps at 3 evenly-spaced discriminator depths.
+
+                Used for multi-scale feature matching (early/mid/late activations).
+                Weights in the calling code: [0.1, 0.3, 0.6] (texture → semantics).
+                """
+                features = []
+                lrelu_i = 0
+                for layer in self.feat_layers:
+                    x = layer(x)
+                    if isinstance(layer, nn.LeakyReLU):
+                        if lrelu_i in self.extract_at:
+                            features.append(x)
+                        lrelu_i += 1
                 return features
 
-        disc = Discriminator(feature_layers, final_layer)
+        disc = Discriminator(
+            feature_layers, final_layer, _num_classes, penultimate_channels, extract_at
+        )
+
+        # Initialise weights — SN wraps weight as weight_orig, initialize that
         for m in disc.modules():
-            if isinstance(m, nn.Conv2d):
+            if hasattr(m, 'weight_orig'):  # spectral_norm-wrapped
+                nn.init.normal_(m.weight_orig, 0.0, 0.02)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+            elif isinstance(m, nn.Conv2d):
                 nn.init.normal_(m.weight, 0.0, 0.02)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
+
         return disc
+
+    # ------------------------------------------------------------------
+    # Repulsion loss
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_repulsion_loss(
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        margin: float = 0.3,
+    ) -> torch.Tensor:
+        """Intra-class embedding repulsion to prevent per-class mode collapse.
+
+        For each class in the batch, computes pairwise L2 distances and penalises
+        embedding pairs that are closer than ``margin``:
+            L_repulse = mean(max(0, margin - d_ij)²)  for same-class pairs (i,j)
+
+        Only upper-triangle pairs are used to avoid double-counting.
+        Applied during Phase 2 (GAN phase) only, weighted by lambda_repulse.
+        """
+        unique_labels = torch.unique(labels)
+        total_repulsion = embeddings.new_zeros(1)
+        n_pairs = 0
+
+        for lbl in unique_labels:
+            class_embs = embeddings[labels == lbl]  # [K, D]
+            if class_embs.size(0) < 2:
+                continue
+            # Pairwise distances
+            diff = class_embs.unsqueeze(0) - class_embs.unsqueeze(1)  # [K, K, D]
+            dists = diff.norm(dim=-1)  # [K, K]
+            # Upper triangle (exclude self-pairs)
+            mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
+            pair_dists = dists[mask_upper]
+            violations = F.relu(margin - pair_dists)
+            total_repulsion = total_repulsion + (violations ** 2).sum()
+            n_pairs += len(pair_dists)
+
+        if n_pairs == 0:
+            return total_repulsion.squeeze()
+        return (total_repulsion / n_pairs).squeeze()
 
     # ------------------------------------------------------------------
     # Inference
@@ -437,7 +605,6 @@ class SynthesisPipeline:
             np.array(synthetic_embeddings)
         ).float()
 
-        # Pass class labels to decoder when class conditioning is active
         if getattr(self.decoder, 'num_classes', 0) > 0:
             labels_tensor = torch.from_numpy(
                 np.array(synthetic_labels, dtype=np.int64)

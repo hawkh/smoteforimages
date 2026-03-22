@@ -803,6 +803,24 @@ A training procedure comprising: a reconstruction-only phase covering the first 
 ### Claim 7 — Pipeline for Universal Class-Imbalanced Image Dataset Augmentation
 An end-to-end configurable pipeline that accepts any image dataset in standard folder-class layout and produces a class-balanced augmented dataset via SLERP-SMOTE embedding interpolation and class-conditional adversarial decoding, with automatic imbalance detection and configurable balancing strategy.
 
+### Claim 8 — von Mises-Fisher Distribution Sampling on Adversarially Trained Hyperspherical Embeddings
+A method for synthetic minority-class embedding generation comprising: fitting a von Mises-Fisher (vMF) distribution per class to the L2-normalised embeddings residing on the unit hypersphere S^(D-1); estimating the mean direction μ and concentration parameter κ via maximum likelihood (Banerjee et al. approximation: κ̂ = r̄(D - r̄²)/(1 - r̄²)); sampling new unit-sphere embeddings from vMF(μ, κ·σ) using Wood's (1994) rejection algorithm with Householder rotation; and scaling samples back to the average class embedding norm. The concentration scale σ provides a continuous fidelity/diversity trade-off: σ > 1 increases fidelity, σ < 1 increases diversity. This is novel because k-NN SLERP is limited to interpolation between observed pairs and cannot sample the full class distribution on the hypersphere.
+
+### Claim 9 — Density-Adaptive SLERP Interpolation Parameter Scheduling
+A method for SLERP-SMOTE sample generation wherein the interpolation parameter t is selected based on the estimated local embedding density along each geodesic arc: when the midpoint density (approximated as the mean of per-point k-NN density estimates for the pair endpoints) falls below a class density threshold, t is sampled from a Beta(3, 3) distribution concentrated near 0.5 (gap-filling mode); otherwise t is sampled uniformly from [0, 1]. This density-weighted scheduling fills sparse regions of the embedding manifold more aggressively than existing pairs, producing synthetic samples that improve manifold coverage without drifting toward already-dense regions.
+
+### Claim 10 — Projection Discriminator with Spectral Normalisation for Class-Conditional WGAN-GP
+A discriminator architecture for class-conditional Wasserstein GAN training comprising: spectral normalisation (Miyato et al. 2018) applied to every convolutional layer providing per-layer Lipschitz-1 constraint via power iteration, complementing the global gradient penalty; a class embedding table V ∈ ℝ^{K×C} where K is the number of classes and C is the penultimate feature dimension; and a projection score augmentation D_proj(x, y) = D_base(x) + ⟨V·y, GAP(φ(x))⟩ where φ(x) is the penultimate feature map and GAP denotes global average pooling. The combination of per-layer SN and global GP provides dual Lipschitz regularisation superior to either constraint alone.
+
+### Claim 11 — Intra-Class Embedding Repulsion Loss for Diversity Preservation in SMOTE-GAN Pipelines
+A training regulariser applied during the adversarial phase that penalises within-class embedding pairs that are closer than a margin threshold: L_repulse = mean(ReLU(margin - ‖z_i - z_j‖₂)²) for all same-class pairs (i, j) in the batch. Applied to the encoder's output embeddings with weight λ_repulse = 0.01 during Phase 2 only, this loss explicitly prevents per-class mode collapse in the embedding space without affecting between-class separation.
+
+### Claim 12 — Adaptive Wasserstein Distance Monitoring for Dynamic Adversarial Loss Scheduling
+A method for dynamically adjusting the adversarial loss weight λ_adv during WGAN-GP training using a closed-loop controller: an exponential moving average of the epoch-level Wasserstein distance estimate is maintained (W_ema ← 0.99 · W_ema + 0.01 · W_current); the change in W_ema over a sliding window of 10 epochs determines whether to increase (when W-distance is improving) or decrease (when stagnant) λ_adv with step size 0.005, clamped to [0.01, 0.50]. This replaces heuristic linear ramps with a feedback-controlled schedule that responds to actual GAN convergence dynamics.
+
+### Claim 13 — Synthesis Ancestry Tracking for Synthetic Dataset Data Provenance
+A method for recording the generative lineage of every synthetic embedding produced by SLERP-SMOTE, comprising: storing for each synthetic sample the indices of its two parent real embeddings, the interpolation weight t, the method used (SLERP or vMF), and the within-class cluster assignment. This ancestry metadata enables auditing, reproducibility, and traceability of synthetic augmentation datasets — properties required by data governance regulations in high-stakes domains such as medical imaging and biometric identification.
+
 ---
 
 ## 6. MATHEMATICAL FORMULATIONS
@@ -877,6 +895,51 @@ Let μ_r, Σ_r and μ_s, Σ_s be the mean and covariance of Inception-V3 feature
 FID = ‖μ_r - μ_s‖₂²  +  Tr(Σ_r + Σ_s - 2·(Σ_r·Σ_s)^{1/2})
 ```
 Lower FID indicates the synthetic distribution is closer to the real distribution.
+
+### 6.7 von Mises-Fisher Distribution
+
+The vMF distribution on the unit hypersphere S^{D-1} has density:
+```
+f(x; μ, κ) = C_D(κ) · exp(κ · μᵀx)
+```
+where C_D(κ) = κ^{D/2-1} / ((2π)^{D/2} · I_{D/2-1}(κ)) is the normalisation constant
+and I_ν denotes the modified Bessel function of the first kind.
+
+**MLE (Banerjee et al. 2005):**
+```
+μ̂ = (Σ xᵢ) / ‖Σ xᵢ‖₂            (normalised mean direction)
+r̄ = ‖(1/n) Σ xᵢ‖₂               (mean resultant length, r̄ ∈ [0,1])
+κ̂ ≈ r̄(D - r̄²) / (1 - r̄²)       (concentration approximation)
+```
+
+### 6.8 Projection Discriminator Score
+
+For image x with class label y, the projection discriminator computes:
+```
+D_proj(x, y) = φ(x)ᵀ · w + ⟨V · y, GAP(h(x))⟩
+```
+where φ(x) is the penultimate feature map, h(x) = GAP(φ(x)) ∈ ℝ^C,
+V ∈ ℝ^{K×C} is the class embedding table, and w is the final linear weight.
+
+### 6.9 Intra-Class Repulsion Loss
+
+For a mini-batch B with same-class pairs P_c = {(i,j) : y_i = y_j, i < j}:
+```
+L_repulse = (1/|P_c|) Σ_{(i,j)∈P_c} max(0, margin - ‖z_i - z_j‖₂)²
+```
+Total generator loss in Phase 2:
+```
+L_G = L_recon + λ_adv · L_adv + 0.1 · L_FM + λ_repulse · L_repulse
+```
+
+### 6.10 Adaptive λ_adv Control
+
+EMA of Wasserstein estimate per epoch e:
+```
+W_ema[e] = 0.99 · W_ema[e-1] + 0.01 · (E[D(x_real)] - E[D(x_fake)])_e
+dW = W_ema[e] - W_ema[e - W]       (W = 10-epoch window)
+λ_adv[e+1] = clip(λ_adv[e] + 0.005 · sign(-dW), 0.01, 0.50)
+```
 
 ---
 
