@@ -12,6 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
+from scipy.spatial.distance import cdist
 from imblearn.over_sampling import SMOTE
 import logging
 import warnings
@@ -364,15 +365,35 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
+        unique_labels = np.unique(synthetic_labels)
+
+        # ⚡ Bolt Optimization: Vectorized distance calculation
+        # Replaced iterative Python loop (np.linalg.norm per sample) with cdist.
+        # This groups computations by label, drastically reducing loop overhead
+        # and pushing the O(N*M) distance calculations down into optimized C code.
+        for label in unique_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+
+            if len(label_embeddings) == 0:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_embs = synthetic_embeddings[syn_mask]
+
+            if len(syn_embs) == 0:
+                continue
+
+            distances = cdist(syn_embs, label_embeddings, metric='euclidean')
+            min_dists = np.min(distances, axis=1)
+
+            valid_mask = min_dists <= self.max_distance_threshold
+
+            syn_indices = np.where(syn_mask)[0]
+            valid_indices.extend(syn_indices[valid_mask])
 
         if valid_indices:
+            valid_indices = np.sort(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 
