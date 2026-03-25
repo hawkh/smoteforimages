@@ -1,0 +1,3 @@
+## 2024-03-25 - GPU to CPU memory copying overhead in diversity computations
+**Learning:** In PyTorch, using CPU-bound numpy functions (like `sklearn.metrics.pairwise_distances`) for batch operations directly prevents PyTorch tensors from utilizing GPU acceleration and invokes slow data transfers from GPU to CPU memory.
+**Action:** Always favor native PyTorch equivalents (`torch.cdist` over `pairwise_distances`) for tensors to compute operations efficiently. Additionally, be mindful of defaults; specify `unbiased=False` in `torch.std` if attempting to match numpy's default behavior exactly, and use `device=tensor.device` for index matrices like `torch.triu_indices` to avoid unintended CPU offloading.
