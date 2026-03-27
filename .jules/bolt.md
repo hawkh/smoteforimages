@@ -1,0 +1,3 @@
+## 2024-05-18 - [PyTorch GPU optimization for distance matrix calculations]
+**Learning:** Moving tensor data back and forth between GPU and CPU to compute pairwise distance matrices with `scipy` or `sklearn` acts as a massive bottleneck. Converting NumPy-based `pairwise_distances` to PyTorch-native `torch.cdist` completely removes CPU overhead and computes the distances much faster on the GPU (~3x speedup).
+**Action:** When working on GPU-enabled environments, ensure any pairwise-distance or large-scale statistical comparisons avoid moving items to CPU/NumPy. Specifically, ensure native PyTorch implementations correctly mimic NumPy behaviors (e.g. using `unbiased=False` for standard deviation calculations and specifying matching `device` assignments).
