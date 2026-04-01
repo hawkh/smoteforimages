@@ -14,7 +14,7 @@ from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
 import logging
-import warnings
+
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,91 @@ class ConstrainedSMOTE:
         interp_norm = (1.0 - t) * n0 + t * n1
         return interp_unit * interp_norm
 
+    @staticmethod
+    def _slerp_vectorized(v0: np.ndarray, v1: np.ndarray, t: np.ndarray) -> np.ndarray:
+        """Vectorized spherical linear interpolation for multiple pairs.
+
+        Optimized implementation of _slerp that processes arrays of vectors simultaneously.
+
+        Args:
+            v0: Start vectors [N, D]
+            v1: End vectors [N, D]
+            t: Interpolation weights [N]
+
+        Returns:
+            Interpolated vectors [N, D]
+        """
+        n0 = np.linalg.norm(v0, axis=1, keepdims=True)
+        n1 = np.linalg.norm(v1, axis=1, keepdims=True)
+
+        # Pre-allocate output
+        out = np.empty_like(v0)
+        t_exp = t[:, np.newaxis]
+
+        # 1. Handle zero norm (linear interpolation fallback)
+        zero_mask = (n0.squeeze(1) < 1e-8) | (n1.squeeze(1) < 1e-8)
+        if np.any(zero_mask):
+            out[zero_mask] = (1.0 - t_exp[zero_mask]) * v0[zero_mask] + t_exp[zero_mask] * v1[zero_mask]
+
+        valid_mask = ~zero_mask
+        if not np.any(valid_mask):
+            return out
+
+        v0_v = v0[valid_mask]
+        v1_v = v1[valid_mask]
+        t_v = t_exp[valid_mask]
+        n0_v = n0[valid_mask]
+        n1_v = n1[valid_mask]
+
+        u0 = v0_v / n0_v
+        u1 = v1_v / n1_v
+
+        # Dot product
+        dot = np.sum(u0 * u1, axis=1, keepdims=True)
+        dot = np.clip(dot, -1.0, 1.0)
+        omega = np.arccos(dot)
+
+        # 2. Handle parallel vectors (linear interpolation on unit sphere)
+        parallel_mask = (np.abs(omega.squeeze(1)) < 1e-6)
+
+        # We will build out_valid for all valid elements
+        out_valid = np.empty_like(v0_v)
+
+        if np.any(parallel_mask):
+            t_p = t_v[parallel_mask]
+            u0_p = u0[parallel_mask]
+            u1_p = u1[parallel_mask]
+
+            interp_unit = (1.0 - t_p) * u0_p + t_p * u1_p
+            norm_iu = np.linalg.norm(interp_unit, axis=1, keepdims=True)
+
+            # Normalise if not near zero
+            non_zero_iu = (norm_iu.squeeze(1) > 1e-8)
+            if np.any(non_zero_iu):
+                interp_unit[non_zero_iu] = interp_unit[non_zero_iu] / norm_iu[non_zero_iu]
+
+            interp_norm = (1.0 - t_p) * n0_v[parallel_mask] + t_p * n1_v[parallel_mask]
+            out_valid[parallel_mask] = interp_unit * interp_norm
+
+        # 3. Standard spherical interpolation
+        normal_mask = ~parallel_mask
+        if np.any(normal_mask):
+            omega_n = omega[normal_mask]
+            s_n = np.sin(omega_n)
+
+            t_n = t_v[normal_mask]
+
+            interp_unit = (
+                np.sin((1.0 - t_n) * omega_n) / s_n * u0[normal_mask]
+                + np.sin(t_n * omega_n) / s_n * u1[normal_mask]
+            )
+
+            interp_norm = (1.0 - t_n) * n0_v[normal_mask] + t_n * n1_v[normal_mask]
+            out_valid[normal_mask] = interp_unit * interp_norm
+
+        out[valid_mask] = out_valid
+        return out
+
     def _generate_slerp(
         self,
         work_embeddings: np.ndarray,
@@ -212,7 +297,7 @@ class ConstrainedSMOTE:
                 return empty, np.empty(0, dtype=np.int64)
 
         synthetics: List[np.ndarray] = []
-        syn_labels: List[int] = []
+        syn_labels: List[np.ndarray] = []
 
         for label in unique_labels:
             class_embs = work_embeddings[self.labels == label]
@@ -225,20 +310,27 @@ class ConstrainedSMOTE:
             nbrs.fit(class_embs)
             _, nn_idx = nbrs.kneighbors(class_embs)  # (n, k+1); col-0 is self
 
-            for _ in range(per_class):
-                i = int(rng.integers(n))
-                col = int(rng.integers(1, k + 1))
-                j = int(nn_idx[i, col])
-                t = float(rng.uniform(0.0, 1.0))
-                synthetics.append(self._slerp(class_embs[i], class_embs[j], t))
-                syn_labels.append(int(label))
+            # Vectorized sampling
+            i_indices = rng.integers(n, size=per_class)
+            col_indices = rng.integers(1, k + 1, size=per_class)
+            j_indices = nn_idx[i_indices, col_indices]
+
+            t_values = rng.uniform(0.0, 1.0, size=per_class)
+
+            v0 = class_embs[i_indices]
+            v1 = class_embs[j_indices]
+
+            class_synthetics = self._slerp_vectorized(v0, v1, t_values)
+
+            synthetics.append(class_synthetics)
+            syn_labels.append(np.full(per_class, label, dtype=np.int64))
 
         if not synthetics:
             empty = np.empty((0, work_embeddings.shape[1]), dtype=work_embeddings.dtype)
             return empty, np.empty(0, dtype=np.int64)
 
-        syn_arr = np.array(synthetics, dtype=work_embeddings.dtype)
-        lbl_arr = np.array(syn_labels, dtype=np.int64)
+        syn_arr = np.vstack(synthetics).astype(work_embeddings.dtype)
+        lbl_arr = np.concatenate(syn_labels).astype(np.int64)
 
         # Trim to exact requested count
         if n_samples is not None and 0 < n_samples < len(syn_arr):
