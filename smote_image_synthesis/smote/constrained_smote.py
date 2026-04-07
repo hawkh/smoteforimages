@@ -183,6 +183,58 @@ class ConstrainedSMOTE:
         interp_norm = (1.0 - t) * n0 + t * n1
         return interp_unit * interp_norm
 
+    @staticmethod
+    def _slerp_vectorized(v0: np.ndarray, v1: np.ndarray, t: np.ndarray) -> np.ndarray:
+        """Vectorized Spherical linear interpolation between arrays of vectors.
+
+        Args:
+            v0: Start vectors [N, D]
+            v1: End vectors [N, D]
+            t: Interpolation weights [N] in [0, 1]
+
+        Returns:
+            Interpolated vectors [N, D]
+        """
+        t = t[:, np.newaxis]
+
+        # Calculate norms manually for speed (np.linalg.norm is slower)
+        n0 = np.sqrt(np.sum(v0 * v0, axis=1, keepdims=True))
+        n1 = np.sqrt(np.sum(v1 * v1, axis=1, keepdims=True))
+
+        n0_safe = np.where(n0 < 1e-8, 1.0, n0)
+        n1_safe = np.where(n1 < 1e-8, 1.0, n1)
+
+        u0 = v0 / n0_safe
+        u1 = v1 / n1_safe
+
+        dot = np.clip(np.sum(u0 * u1, axis=1, keepdims=True), -1.0, 1.0)
+        omega = np.arccos(dot)
+        sin_omega = np.sin(omega)
+
+        zero_norm_mask = (n0 < 1e-8) | (n1 < 1e-8)
+        small_angle_mask = np.abs(omega) < 1e-6
+
+        sin_omega_safe = np.where(small_angle_mask, 1.0, sin_omega)
+
+        w0 = np.sin((1.0 - t) * omega) / sin_omega_safe
+        w1 = np.sin(t * omega) / sin_omega_safe
+
+        mag = (1.0 - t) * n0 + t * n1
+        res = (w0 * u0 + w1 * u1) * mag
+
+        if np.any(small_angle_mask):
+            linear_unit = (1.0 - t) * u0 + t * u1
+            linear_norm = np.sqrt(np.sum(linear_unit * linear_unit, axis=1, keepdims=True))
+            linear_norm_safe = np.where(linear_norm < 1e-8, 1.0, linear_norm)
+            linear_unit = linear_unit / linear_norm_safe
+            res = np.where(small_angle_mask, linear_unit * mag, res)
+
+        if np.any(zero_norm_mask):
+            fallback = (1.0 - t) * v0 + t * v1
+            res = np.where(zero_norm_mask, fallback, res)
+
+        return res
+
     def _generate_slerp(
         self,
         work_embeddings: np.ndarray,
@@ -225,13 +277,19 @@ class ConstrainedSMOTE:
             nbrs.fit(class_embs)
             _, nn_idx = nbrs.kneighbors(class_embs)  # (n, k+1); col-0 is self
 
-            for _ in range(per_class):
-                i = int(rng.integers(n))
-                col = int(rng.integers(1, k + 1))
-                j = int(nn_idx[i, col])
-                t = float(rng.uniform(0.0, 1.0))
-                synthetics.append(self._slerp(class_embs[i], class_embs[j], t))
-                syn_labels.append(int(label))
+            if per_class > 0:
+                i_indices = rng.integers(0, n, size=per_class)
+                col_indices = rng.integers(1, k + 1, size=per_class)
+                j_indices = nn_idx[i_indices, col_indices]
+                t_vals = rng.uniform(0.0, 1.0, size=per_class)
+
+                v0_batch = class_embs[i_indices]
+                v1_batch = class_embs[j_indices]
+
+                syn_batch = self._slerp_vectorized(v0_batch, v1_batch, t_vals)
+
+                synthetics.extend(syn_batch)
+                syn_labels.extend([int(label)] * per_class)
 
         if not synthetics:
             empty = np.empty((0, work_embeddings.shape[1]), dtype=work_embeddings.dtype)
