@@ -13,6 +13,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
+import scipy.spatial.distance
 import logging
 import warnings
 
@@ -359,19 +360,42 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized with scipy.spatial.distance.cdist for vectorized O(N) evaluation,
+        batched to prevent memory exhaustion on large matrices.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        unique_labels = np.unique(synthetic_labels)
 
+        for label in unique_labels:
+            label_mask_syn = synthetic_labels == label
+            label_mask_orig = self.labels == label
+
+            syn_embs_class = synthetic_embeddings[label_mask_syn]
+            orig_embs_class = self.embeddings[label_mask_orig]
+
+            if len(orig_embs_class) == 0 or len(syn_embs_class) == 0:
+                continue
+
+            batch_size = 1000
+            syn_indices = np.where(label_mask_syn)[0]
+
+            for start_idx in range(0, len(syn_embs_class), batch_size):
+                end_idx = start_idx + batch_size
+                batch_syn = syn_embs_class[start_idx:end_idx]
+
+                # Vectorized distance computation between batch and all original class embeddings
+                distances = scipy.spatial.distance.cdist(batch_syn, orig_embs_class, metric='euclidean')
+                min_distances = np.min(distances, axis=1)
+
+                valid_batch_mask = min_distances <= self.max_distance_threshold
+                valid_indices.extend(syn_indices[start_idx:end_idx][valid_batch_mask])
+
+        valid_indices.sort()
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
