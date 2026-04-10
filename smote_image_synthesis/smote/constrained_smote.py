@@ -14,7 +14,7 @@ from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
 import logging
-import warnings
+
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,55 @@ class ConstrainedSMOTE:
         interp_norm = (1.0 - t) * n0 + t * n1
         return interp_unit * interp_norm
 
+    @staticmethod
+    def _slerp_vectorized(v0: np.ndarray, v1: np.ndarray, t: np.ndarray) -> np.ndarray:
+        """Vectorized spherical linear interpolation for batches.
+
+        Args:
+            v0: Start vectors [N, D]
+            v1: End vectors [N, D]
+            t: Interpolation weights [N, 1]
+
+        Returns:
+            Interpolated vectors [N, D]
+        """
+        n0 = np.linalg.norm(v0, axis=1, keepdims=True)
+        n1 = np.linalg.norm(v1, axis=1, keepdims=True)
+
+        mask_zero = (n0 < 1e-8) | (n1 < 1e-8)
+
+        n0_safe = np.where(n0 < 1e-8, 1.0, n0)
+        n1_safe = np.where(n1 < 1e-8, 1.0, n1)
+
+        u0 = v0 / n0_safe
+        u1 = v1 / n1_safe
+
+        dot = np.sum(u0 * u1, axis=1, keepdims=True)
+        dot = np.clip(dot, -1.0, 1.0)
+        omega = np.arccos(dot)
+
+        mask_parallel = np.abs(omega) < 1e-6
+
+        interp_linear = (1.0 - t) * u0 + t * u1
+        norm_linear = np.linalg.norm(interp_linear, axis=1, keepdims=True)
+        norm_linear_safe = np.where(norm_linear < 1e-8, 1.0, norm_linear)
+        interp_linear_unit = np.where(norm_linear < 1e-8, interp_linear, interp_linear / norm_linear_safe)
+
+        s = np.sin(omega)
+        s_safe = np.where(mask_parallel, 1.0, s)
+        interp_slerp = (
+            np.sin((1.0 - t) * omega) / s_safe * u0
+            + np.sin(t * omega) / s_safe * u1
+        )
+
+        interp_unit = np.where(mask_parallel, interp_linear_unit, interp_slerp)
+        interp_norm = (1.0 - t) * n0 + t * n1
+
+        result = interp_unit * interp_norm
+        result_zero = (1.0 - t) * v0 + t * v1
+
+        return np.where(mask_zero, result_zero, result)
+
     def _generate_slerp(
         self,
         work_embeddings: np.ndarray,
@@ -212,7 +261,7 @@ class ConstrainedSMOTE:
                 return empty, np.empty(0, dtype=np.int64)
 
         synthetics: List[np.ndarray] = []
-        syn_labels: List[int] = []
+        syn_labels: List[np.ndarray] = []
 
         for label in unique_labels:
             class_embs = work_embeddings[self.labels == label]
@@ -225,20 +274,32 @@ class ConstrainedSMOTE:
             nbrs.fit(class_embs)
             _, nn_idx = nbrs.kneighbors(class_embs)  # (n, k+1); col-0 is self
 
-            for _ in range(per_class):
-                i = int(rng.integers(n))
-                col = int(rng.integers(1, k + 1))
-                j = int(nn_idx[i, col])
-                t = float(rng.uniform(0.0, 1.0))
-                synthetics.append(self._slerp(class_embs[i], class_embs[j], t))
-                syn_labels.append(int(label))
+            i_indices = rng.integers(n, size=per_class)
+            col_indices = rng.integers(1, k + 1, size=per_class)
+            j_indices = nn_idx[i_indices, col_indices]
+            t_vals = rng.uniform(0.0, 1.0, size=(per_class, 1))
+
+            v0_batch = class_embs[i_indices]
+            v1_batch = class_embs[j_indices]
+
+            # Process in batches to avoid OOM or slow down for large per_class
+            batch_size = 10000
+            for b_start in range(0, per_class, batch_size):
+                b_end = min(b_start + batch_size, per_class)
+                syn_b = self._slerp_vectorized(
+                    v0_batch[b_start:b_end],
+                    v1_batch[b_start:b_end],
+                    t_vals[b_start:b_end]
+                )
+                synthetics.append(syn_b)
+                syn_labels.append(np.full(b_end - b_start, int(label), dtype=np.int64))
 
         if not synthetics:
             empty = np.empty((0, work_embeddings.shape[1]), dtype=work_embeddings.dtype)
             return empty, np.empty(0, dtype=np.int64)
 
-        syn_arr = np.array(synthetics, dtype=work_embeddings.dtype)
-        lbl_arr = np.array(syn_labels, dtype=np.int64)
+        syn_arr = np.concatenate(synthetics, axis=0)
+        lbl_arr = np.concatenate(syn_labels, axis=0)
 
         # Trim to exact requested count
         if n_samples is not None and 0 < n_samples < len(syn_arr):
