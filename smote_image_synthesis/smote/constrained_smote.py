@@ -10,6 +10,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
+from scipy.spatial.distance import cdist
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
@@ -364,14 +365,35 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
 
+            if len(label_embeddings) == 0:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            syn_embeddings = synthetic_embeddings[syn_mask]
+
+            # Batch size to prevent memory explosion with very large arrays
+            # cdist returns matrix of shape (len(batch_syn), len(label_embeddings))
+            # 5000 * 5000 float64 ~ 200MB memory per batch
+            batch_size = 5000
+            for i in range(0, len(syn_embeddings), batch_size):
+                batch_syn_embeddings = syn_embeddings[i:i+batch_size]
+                batch_syn_indices = syn_indices[i:i+batch_size]
+
+                # Vectorized distance computation using cdist
+                distances = cdist(batch_syn_embeddings, label_embeddings, metric='euclidean')
+                min_distances = np.min(distances, axis=1)
+
+                valid_batch_mask = min_distances <= self.max_distance_threshold
+                valid_indices.extend(batch_syn_indices[valid_batch_mask])
+
+        valid_indices.sort()
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
