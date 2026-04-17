@@ -1,0 +1,10 @@
+{
+  "snapshot_1": {
+    "epochs": 100,
+    "avg_g_loss_last10": 0.29120865685277086
+  },
+  "snapshot_2": {
+    "epochs": 200,
+    "avg_g_loss_last10": 0.08444360239235194
+  }
+}

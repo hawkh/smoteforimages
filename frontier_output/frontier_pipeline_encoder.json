@@ -1,0 +1,11 @@
+{
+  "architecture": "resnet18",
+  "embedding_dim": 512,
+  "pretrained": true,
+  "config": {
+    "freeze_backbone": false,
+    "dropout_rate": 0.1,
+    "normalize_output": true
+  },
+  "model_path": "frontier_output\\frontier_pipeline_encoder.pth"
+}

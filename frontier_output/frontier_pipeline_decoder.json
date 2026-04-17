@@ -1,0 +1,16 @@
+{
+  "embedding_dim": 512,
+  "image_shape": [
+    3,
+    32,
+    32
+  ],
+  "config": {
+    "base_channels": 256,
+    "num_classes": 2,
+    "class_embed_dim": 64,
+    "use_self_attention": true
+  },
+  "decoder_type": "DCGANDecoder",
+  "model_path": "frontier_output\\frontier_pipeline_decoder.pth"
+}
