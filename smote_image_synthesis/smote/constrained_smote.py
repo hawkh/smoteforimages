@@ -386,13 +386,14 @@ class ConstrainedSMOTE:
         """Sample from vMF(μ, κ) using Wood's (1994) rejection algorithm.
 
         Works for any d ≥ 2.  Returns unit-norm samples on S^(d-1).
+        Vectorized for improved performance.
         """
         d = len(mu)
 
         # Wood's algorithm parameters
         b = (-2.0 * kappa + np.sqrt(4.0 * kappa ** 2 + (d - 1) ** 2)) / (d - 1)
         x0 = (1.0 - b) / (1.0 + b)
-        c = kappa * x0 + (d - 1) * math.log(max(1.0 - x0 ** 2, 1e-12))
+        c = kappa * x0 + (d - 1) * np.log(max(1.0 - x0 ** 2, 1e-12))
 
         # Householder reflection: maps e1 = [1, 0, ...] → μ
         e1 = np.zeros(d)
@@ -405,43 +406,45 @@ class ConstrainedSMOTE:
 
         alpha = (d - 1) / 2.0  # Beta shape param
 
-        samples = np.zeros((n_samples, d))
-        for idx in range(n_samples):
-            # Rejection sampling for the axial component W
-            for _attempt in range(100000):
-                Z = float(rng.beta(alpha, alpha))
-                W = (1.0 - (1.0 + b) * Z) / (1.0 - (1.0 - b) * Z)
-                U = float(rng.uniform())
-                log_criterion = (
-                    kappa * W
-                    + (d - 1) * math.log(max(1.0 - x0 * W, 1e-12))
-                    - c
-                )
-                if log_criterion >= math.log(max(U, 1e-12)):
-                    break
-            else:
-                W = x0  # extremely unlikely fallback
+        # Vectorized rejection sampling for W
+        W = np.zeros(n_samples)
+        remaining_indices = np.arange(n_samples)
 
-            # Sample uniform vector on S^(d-2)
-            v = rng.standard_normal(d - 1)
-            v_norm = np.linalg.norm(v)
-            if v_norm > 1e-8:
-                v = v / v_norm
-            else:
-                v = np.zeros(d - 1)
-                v[0] = 1.0
+        while len(remaining_indices) > 0:
+            n_rem = len(remaining_indices)
+            Z = rng.beta(alpha, alpha, size=n_rem)
+            W_try = (1.0 - (1.0 + b) * Z) / (1.0 - (1.0 - b) * Z)
+            U = rng.uniform(size=n_rem)
 
-            # Construct x in frame where μ = e1: x = [W, √(1-W²) · v]
-            scale = math.sqrt(max(0.0, 1.0 - W ** 2))
-            x = np.concatenate([[W], scale * v])
+            log_criterion = (
+                kappa * W_try
+                + (d - 1) * np.log(np.maximum(1.0 - x0 * W_try, 1e-12))
+                - c
+            )
 
-            # Householder rotation: x → H·x where H·e1 = μ
-            if has_rotation:
-                x = x - 2.0 * np.dot(x, u) * u
+            accept = log_criterion >= np.log(np.maximum(U, 1e-12))
+            accepted_idx = remaining_indices[accept]
 
-            samples[idx] = x
+            W[accepted_idx] = W_try[accept]
+            remaining_indices = remaining_indices[~accept]
 
-        return samples
+        # Sample uniform vector on S^(d-2)
+        v = rng.standard_normal((n_samples, d - 1))
+        v_norm = np.linalg.norm(v, axis=1, keepdims=True)
+        v = np.where(v_norm > 1e-8, v / v_norm, np.zeros_like(v))
+        v[v_norm.flatten() <= 1e-8, 0] = 1.0
+
+        # Construct x in frame where μ = e1: x = [W, √(1-W²) · v]
+        scale = np.sqrt(np.maximum(0.0, 1.0 - W ** 2))
+        x = np.empty((n_samples, d))
+        x[:, 0] = W
+        x[:, 1:] = scale[:, np.newaxis] * v
+
+        # Householder rotation: x → H·x where H·e1 = μ
+        if has_rotation:
+            x -= 2.0 * np.outer(np.dot(x, u), u)
+
+        return x
 
     def _generate_vmf(
         self,
