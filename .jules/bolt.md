@@ -1,0 +1,3 @@
+## 2025-02-20 - [Avoid CPU transfer for tensor pairwise distances]
+**Learning:** Moving tensor data back and forth to the CPU using `.cpu().numpy()` just to compute pairwise distances with `sklearn.metrics.pairwise.pairwise_distances` introduces significant performance bottlenecks, especially during diversity metric calculations on large image datasets.
+**Action:** Use native PyTorch equivalents like `torch.cdist` along with `torch.triu_indices` for operations directly on the GPU, avoiding the expensive CPU-to-GPU transfer bottleneck and achieving >2x speedups.
