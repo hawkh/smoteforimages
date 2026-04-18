@@ -10,6 +10,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
+from scipy.spatial.distance import cdist
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
@@ -704,20 +705,43 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        ⚡ Bolt Optimization: Replaced O(N x M) python loop with batched
+        vectorized cdist operations to massively speed up filtering while
+        preventing OOM errors for large classes.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            syn_embs = synthetic_embeddings[syn_mask]
+            syn_idx = np.where(syn_mask)[0]
+
+            orig_mask = self.labels == label
+            orig_embs = self.embeddings[orig_mask]
+
+            if len(orig_embs) == 0:
+                continue
+
+            # Process in batches of 1000 to avoid OOM
+            batch_size = 1000
+            for i in range(0, len(syn_embs), batch_size):
+                syn_batch = syn_embs[i:i+batch_size]
+                syn_batch_idx = syn_idx[i:i+batch_size]
+
+                dists = cdist(syn_batch, orig_embs, metric='euclidean')
+                min_dists = np.min(dists, axis=1)
+
+                valid = min_dists <= self.max_distance_threshold
+                valid_indices.extend(syn_batch_idx[valid].tolist())
 
         if valid_indices:
+            valid_indices.sort()
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 
