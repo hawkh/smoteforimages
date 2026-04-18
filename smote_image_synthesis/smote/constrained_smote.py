@@ -5,6 +5,7 @@ Constrained SMOTE implementation for embedding space.
 from typing import Tuple, Optional, Dict, List, Union, Any
 import math
 import numpy as np
+from scipy.spatial.distance import cdist
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
@@ -704,20 +705,31 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
-        if self.max_distance_threshold is None:
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized with vectorized batched cdist for significant speedup.
+        """
+        if self.max_distance_threshold is None or len(synthetic_embeddings) == 0:
             return synthetic_embeddings, synthetic_labels
 
-        valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        valid_mask = np.zeros(len(synthetic_embeddings), dtype=bool)
+        unique_labels = np.unique(synthetic_labels)
 
-        if valid_indices:
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            train_mask = self.labels == label
+
+            syn_embs = synthetic_embeddings[syn_mask]
+            train_embs = self.embeddings[train_mask]
+
+            if len(train_embs) > 0 and len(syn_embs) > 0:
+                # Vectorized pairwise distance calculation
+                dists = cdist(syn_embs, train_embs)
+                min_dists = dists.min(axis=1)
+                valid_mask[syn_mask] = min_dists <= self.max_distance_threshold
+
+        valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) > 0:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 
