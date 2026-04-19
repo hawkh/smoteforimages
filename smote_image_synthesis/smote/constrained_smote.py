@@ -15,6 +15,7 @@ from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
 import logging
 import warnings
+from scipy.spatial.distance import cdist
 
 logger = logging.getLogger(__name__)
 
@@ -705,20 +706,26 @@ class ConstrainedSMOTE:
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Filter synthetic embeddings by distance threshold."""
-        if self.max_distance_threshold is None:
+        if self.max_distance_threshold is None or len(synthetic_embeddings) == 0:
             return synthetic_embeddings, synthetic_labels
 
-        valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        valid_mask = np.zeros(len(synthetic_embeddings), dtype=bool)
+        unique_labels = np.unique(synthetic_labels)
 
-        if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            orig_mask = self.labels == label
+
+            syn_embs_class = synthetic_embeddings[syn_mask]
+            orig_embs_class = self.embeddings[orig_mask]
+
+            if len(syn_embs_class) > 0 and len(orig_embs_class) > 0:
+                distances = cdist(syn_embs_class, orig_embs_class, metric='euclidean')
+                min_distances = distances.min(axis=1)
+                valid_mask[syn_mask] = min_distances <= self.max_distance_threshold
+
+        if np.any(valid_mask):
+            return synthetic_embeddings[valid_mask], synthetic_labels[valid_mask]
         return np.array([]), np.array([])
 
     def _validate_input_data(
