@@ -181,6 +181,45 @@ class TestL2NormalizedEncoder:
 
 
 # ───────────────────────────────────────────────────────────────────────
+# Fast Distance Filtering
+# ───────────────────────────────────────────────────────────────────────
+
+class TestFastDistanceFiltering:
+    def test_filter_by_distance_optimized(self):
+        """_filter_by_distance should correctly and efficiently filter embeddings based on NN max distance threshold."""
+        np.random.seed(42)
+        n_real = 50
+        n_syn = 50
+        dim = 10
+        threshold = 2.0
+
+        real_emb = np.random.randn(n_real, dim)
+        real_labels = np.random.randint(0, 3, n_real)
+
+        syn_emb = np.random.randn(n_syn, dim)
+        syn_labels = np.random.randint(0, 3, n_syn)
+
+        smote = ConstrainedSMOTE(max_distance_threshold=threshold)
+        smote.embeddings = real_emb
+        smote.labels = real_labels
+
+        filtered_emb, filtered_labels = smote._filter_by_distance(syn_emb, syn_labels)
+
+        # Verify the length is less than or equal to original due to filtering
+        assert len(filtered_emb) <= n_syn
+        assert len(filtered_emb) == len(filtered_labels)
+
+        # Ensure all kept samples meet the distance threshold property
+        for syn_e, syn_l in zip(filtered_emb, filtered_labels):
+            real_class_embs = real_emb[real_labels == syn_l]
+            distances = np.linalg.norm(real_class_embs - syn_e, axis=1)
+            assert np.min(distances) <= threshold
+
+        # Check that we didn't just filter everything out if threshold is reasonable
+        assert len(filtered_emb) > 0
+
+
+# ───────────────────────────────────────────────────────────────────────
 # Pipeline: class-conditional generation end-to-end
 # ───────────────────────────────────────────────────────────────────────
 
