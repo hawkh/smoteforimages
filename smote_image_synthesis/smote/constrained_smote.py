@@ -544,34 +544,48 @@ class ConstrainedSMOTE:
         max_attempts = 3
         valid_mask = np.ones(len(synthetic_embeddings), dtype=bool)
 
-        for i, (emb, label) in enumerate(
-            zip(synthetic_embeddings, synthetic_labels)
-        ):
+        unique_labels = np.unique(synthetic_labels)
+        for label in unique_labels:
             label_int = int(label)
             if label_int not in self.outlier_detectors:
                 continue
 
             detector = self.outlier_detectors[label_int]
-            score = int(detector.predict([emb])[0])  # +1=inlier, -1=outlier
+            # ⚡ Bolt Optimization: Batch predict all synthetic samples for this class
+            # to avoid large scikit-learn validation overheads in single-sample predicts.
+            class_mask = synthetic_labels == label_int
+            class_indices = np.where(class_mask)[0]
 
-            if score == -1:
+            if len(class_indices) == 0:
+                continue
+
+            class_embs_to_check = synthetic_embeddings[class_indices]
+            scores = detector.predict(class_embs_to_check)
+
+            # Process only outliers (-1)
+            outlier_indices = class_indices[scores == -1]
+
+            if len(outlier_indices) > 0:
                 class_embs = work_embeddings[self.labels == label_int]
-                replaced = False
-                for _ in range(max_attempts):
-                    if len(class_embs) < 2:
-                        break
-                    idx_a = int(rng.integers(len(class_embs)))
-                    idx_b = int(rng.integers(len(class_embs)))
-                    if idx_a == idx_b:
-                        continue
-                    t_new = float(rng.uniform(0.0, 1.0))
-                    new_emb = self._slerp(class_embs[idx_a], class_embs[idx_b], t_new)
-                    if int(detector.predict([new_emb])[0]) == 1:
-                        synthetic_embeddings[i] = new_emb
-                        replaced = True
-                        break
-                if not replaced:
-                    valid_mask[i] = False
+                if len(class_embs) < 2:
+                    valid_mask[outlier_indices] = False
+                    continue
+
+                for idx in outlier_indices:
+                    replaced = False
+                    for _ in range(max_attempts):
+                        idx_a = int(rng.integers(len(class_embs)))
+                        idx_b = int(rng.integers(len(class_embs)))
+                        if idx_a == idx_b:
+                            continue
+                        t_new = float(rng.uniform(0.0, 1.0))
+                        new_emb = self._slerp(class_embs[idx_a], class_embs[idx_b], t_new)
+                        if int(detector.predict([new_emb])[0]) == 1:
+                            synthetic_embeddings[idx] = new_emb
+                            replaced = True
+                            break
+                    if not replaced:
+                        valid_mask[idx] = False
 
         return synthetic_embeddings[valid_mask], synthetic_labels[valid_mask]
 
