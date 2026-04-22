@@ -5,6 +5,7 @@ Constrained SMOTE implementation for embedding space.
 from typing import Tuple, Optional, Dict, List, Union, Any
 import math
 import numpy as np
+from scipy.spatial.distance import cdist
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
@@ -709,15 +710,26 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
+        unique_labels = np.unique(synthetic_labels)
+
+        # Performance Optimization: Calculate distances in batches grouped by class
+        # using vectorized scipy.spatial.distance.cdist instead of an O(N x M) nested loop
+        for label in unique_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            syn_embs = synthetic_embeddings[syn_mask]
+
+            if len(label_embeddings) > 0 and len(syn_embs) > 0:
+                distances = cdist(syn_embs, label_embeddings)
+                min_distances = np.min(distances, axis=1)
+                valid_syn_indices = syn_indices[min_distances <= self.max_distance_threshold]
+                valid_indices.extend(valid_syn_indices)
 
         if valid_indices:
+            valid_indices.sort()
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 
