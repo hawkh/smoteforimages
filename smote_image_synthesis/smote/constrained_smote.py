@@ -705,21 +705,38 @@ class ConstrainedSMOTE:
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Filter synthetic embeddings by distance threshold."""
-        if self.max_distance_threshold is None:
+        if self.max_distance_threshold is None or len(synthetic_embeddings) == 0:
             return synthetic_embeddings, synthetic_labels
 
-        valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        from scipy.spatial.distance import cdist
 
-        if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
-        return np.array([]), np.array([])
+        valid_mask = np.zeros(len(synthetic_embeddings), dtype=bool)
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            orig_mask = self.labels == label
+
+            syn_embs_class = synthetic_embeddings[syn_mask]
+            orig_embs_class = self.embeddings[orig_mask]
+
+            if len(orig_embs_class) > 0 and len(syn_embs_class) > 0:
+                # Process in chunks to avoid OOM on large datasets
+                chunk_size = 2000
+                class_valid_mask = np.zeros(len(syn_embs_class), dtype=bool)
+                for i in range(0, len(syn_embs_class), chunk_size):
+                    chunk = syn_embs_class[i:i+chunk_size]
+                    dists = cdist(chunk, orig_embs_class, metric='euclidean')
+                    min_dists = np.min(dists, axis=1)
+                    class_valid_mask[i:i+chunk_size] = min_dists <= self.max_distance_threshold
+
+                valid_indices_class = np.where(syn_mask)[0][class_valid_mask]
+                valid_mask[valid_indices_class] = True
+
+        if np.any(valid_mask):
+            return synthetic_embeddings[valid_mask], synthetic_labels[valid_mask]
+
+        return np.array([], dtype=synthetic_embeddings.dtype), np.array([], dtype=synthetic_labels.dtype)
 
     def _validate_input_data(
         self, embeddings: np.ndarray, labels: np.ndarray
