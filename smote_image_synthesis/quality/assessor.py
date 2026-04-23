@@ -152,19 +152,24 @@ class QualityAssessor:
             return {'mean_pairwise_distance': 0.0, 'std_pairwise_distance': 0.0}
         
         # Flatten images for distance computation
-        flattened = images.view(batch_size, -1).cpu().numpy()
+        flattened = images.view(batch_size, -1)
         
-        # Compute pairwise distances efficiently
-        distances = pairwise_distances(flattened, metric='euclidean')
+        # Ensure it's floating point for torch.cdist
+        if not flattened.is_floating_point():
+            flattened = flattened.float()
+
+        # Compute pairwise distances directly on the tensors (CPU or GPU)
+        distances = torch.cdist(flattened, flattened)
         
         # Extract upper triangle (excluding diagonal)
-        upper_triangle = distances[np.triu_indices_from(distances, k=1)]
+        row_indices, col_indices = torch.triu_indices(batch_size, batch_size, offset=1, device=distances.device)
+        upper_triangle = distances[row_indices, col_indices]
         
         if len(upper_triangle) > 0:
-            results['mean_pairwise_distance'] = float(np.mean(upper_triangle))
-            results['std_pairwise_distance'] = float(np.std(upper_triangle))
-            results['min_pairwise_distance'] = float(np.min(upper_triangle))
-            results['max_pairwise_distance'] = float(np.max(upper_triangle))
+            results['mean_pairwise_distance'] = float(torch.mean(upper_triangle).item())
+            results['std_pairwise_distance'] = float(torch.std(upper_triangle, unbiased=False).item())
+            results['min_pairwise_distance'] = float(torch.min(upper_triangle).item())
+            results['max_pairwise_distance'] = float(torch.max(upper_triangle).item())
 
             # Compute diversity index (normalized)
             mean_dist = results['mean_pairwise_distance']
