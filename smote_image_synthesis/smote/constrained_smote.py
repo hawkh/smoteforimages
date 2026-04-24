@@ -13,8 +13,8 @@ from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
+from scipy.spatial.distance import cdist
 import logging
-import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -709,15 +709,33 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            syn_embs = synthetic_embeddings[syn_mask]
+            syn_idx = np.where(syn_mask)[0]
+
+            orig_mask = self.labels == label
+            orig_embs = self.embeddings[orig_mask]
+
+            if len(orig_embs) > 0 and len(syn_embs) > 0:
+                # Process in chunks to avoid OOM for very large arrays
+                chunk_size = 2000
+                for i in range(0, len(syn_embs), chunk_size):
+                    end = min(i + chunk_size, len(syn_embs))
+                    chunk = syn_embs[i:end]
+
+                    # cdist is highly optimized in C and avoids Python loop overhead
+                    dists = cdist(chunk, orig_embs, metric='euclidean')
+                    min_dists = np.min(dists, axis=1)
+
+                    mask = min_dists <= self.max_distance_threshold
+                    valid_chunk_idx = np.where(mask)[0]
+                    valid_indices.extend(syn_idx[i + valid_chunk_idx].tolist())
 
         if valid_indices:
+            valid_indices.sort()
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 
