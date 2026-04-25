@@ -14,7 +14,7 @@ from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
 import logging
-import warnings
+import scipy.spatial.distance
 
 logger = logging.getLogger(__name__)
 
@@ -709,15 +709,37 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            syn_idx = np.where(syn_mask)[0]
+            if len(syn_idx) == 0:
+                continue
+
+            syn_embs = synthetic_embeddings[syn_idx]
+
+            ref_mask = self.labels == label
+            ref_embs = self.embeddings[ref_mask]
+            if len(ref_embs) == 0:
+                continue
+
+            # Process in chunks to avoid OOM
+            chunk_size = 2000
+            for i in range(0, len(syn_embs), chunk_size):
+                chunk_embs = syn_embs[i:i+chunk_size]
+                chunk_idx = syn_idx[i:i+chunk_size]
+
+                distances = scipy.spatial.distance.cdist(
+                    chunk_embs, ref_embs, metric='euclidean'
+                )
+                min_distances = np.min(distances, axis=1)
+                valid_mask = min_distances <= self.max_distance_threshold
+
+                valid_indices.extend(chunk_idx[valid_mask].tolist())
 
         if valid_indices:
+            valid_indices = sorted(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 

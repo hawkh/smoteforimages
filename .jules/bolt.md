@@ -1,0 +1,3 @@
+## 2024-05-18 - Outlier Filtering Optimization Limit
+**Learning:** In `ConstrainedSMOTE`, batching predictions in `_filter_by_outlier_detectors` significantly changes RNG state advancement compared to iterating and predicting single samples (because of how SMOTE retries replacement attempts intermixed with filtering). Attempting to vectorize this causes unit test assertions to fail due to lost determinism.
+**Action:** When vectorizing distance or filtering operations in ML pipelines with tied RNG states, preserve the exact loop structure if conditional fallbacks (like retries) mutate the RNG sequentially.
