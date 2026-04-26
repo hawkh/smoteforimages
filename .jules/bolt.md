@@ -1,0 +1,3 @@
+## 2024-04-26 - PyTorch native distance computation eliminates CPU transfer overhead
+**Learning:** Moving distance metric calculations (like diversity metrics) from NumPy/scikit-learn `sklearn.metrics.pairwise.pairwise_distances` to PyTorch `torch.cdist` eliminates costly `.cpu().numpy()` transfers and yields a ~2x speedup. However, `torch.std` uses `unbiased=True` by default while `numpy.std` uses `ddof=0` (biased).
+**Action:** When migrating metrics from NumPy to PyTorch, always explicitly pass `unbiased=False` to `torch.std` or `torch.var` to maintain exact mathematical equivalence and avoid regression in tests. Use `torch.cdist` and `torch.triu_indices` for pairwise distance calculations on the existing tensor device.
