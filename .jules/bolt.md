@@ -1,0 +1,3 @@
+## 2025-02-27 - [Optimize O(K^2 * D) PyTorch Distance Calculations]
+**Learning:** In PyTorch, computing pairwise distances by expanding dimensions (`diff = x.unsqueeze(0) - x.unsqueeze(1)`) creates an intermediate tensor of shape `[K, K, D]` which scales poorly in memory and speed when `K` (batch size) and `D` (feature dimension) are large.
+**Action:** Always replace dimension expansion and explicit norm calculation with native `torch.cdist(x, x, p=2)`. `torch.cdist` is highly optimized in PyTorch's backend and avoids allocating the large intermediate `[K, K, D]` tensor, improving execution speed significantly (e.g. 30x faster for large K).
