@@ -708,15 +708,37 @@ class ConstrainedSMOTE:
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
+        from scipy.spatial.distance import cdist
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        unique_labels = np.unique(synthetic_labels)
 
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            orig_mask = self.labels == label
+
+            if not np.any(orig_mask):
+                continue
+
+            syn_embs = synthetic_embeddings[syn_mask]
+            orig_embs = self.embeddings[orig_mask]
+
+            # Batch the cdist calculation to avoid OOM for large classes
+            batch_size = 1000
+            n_syn = len(syn_embs)
+            syn_indices = np.where(syn_mask)[0]
+
+            for start_idx in range(0, n_syn, batch_size):
+                end_idx = min(start_idx + batch_size, n_syn)
+                batch_syn_embs = syn_embs[start_idx:end_idx]
+
+                distances = cdist(batch_syn_embs, orig_embs)
+                min_distances = np.min(distances, axis=1)
+
+                batch_valid_mask = min_distances <= self.max_distance_threshold
+                valid_syn_indices = syn_indices[start_idx:end_idx][batch_valid_mask]
+                valid_indices.extend(valid_syn_indices)
+
+        valid_indices.sort()
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])

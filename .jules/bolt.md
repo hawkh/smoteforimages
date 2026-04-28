@@ -1,0 +1,3 @@
+## 2025-04-06 - Memory considerations for Vectorized distance calculations
+**Learning:** Fully vectorized O(N x M) operations like computing pairwise distance matrices using `cdist` on large datasets can easily trigger Out-Of-Memory (OOM) errors. In embeddings processing, class sizes can reach tens of thousands of samples, meaning a naïve vectorization can consume gigabytes of RAM unnecessarily.
+**Action:** Always batch vectorized operations on potentially unbounded datasets. For `_filter_by_distance`, chunking the synthetic embeddings processed by `cdist` limits peak memory usage while still providing the immense speedup of NumPy vectorization over iterative element-wise loops.
