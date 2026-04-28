@@ -13,6 +13,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
+from scipy.spatial.distance import cdist
 import logging
 import warnings
 
@@ -709,15 +710,27 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
+        unique_labels = np.unique(synthetic_labels)
+
+        # Vectorize distance calculations per class to avoid Python loop bottleneck
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+
+            real_mask = self.labels == label
+            label_embeddings = self.embeddings[real_mask]
+
             if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+                # cdist calculates pairwise distances efficiently in C
+                distances = cdist(synthetic_embeddings[syn_mask], label_embeddings)
+                min_distances = np.min(distances, axis=1)
+
+                valid_syn_indices = syn_indices[min_distances <= self.max_distance_threshold]
+                valid_indices.extend(valid_syn_indices)
 
         if valid_indices:
+            # Sort indices to maintain original ordering
+            valid_indices = sorted(valid_indices)
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
 
