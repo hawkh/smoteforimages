@@ -1,0 +1,3 @@
+## 2025-02-23 - [QualityAssessor Diversity Metrics CPU-GPU Sync Bottleneck]
+**Learning:** Computing diversity metrics natively using `torch.cdist` rather than transferring to CPU and using `numpy`/`scipy.spatial.distance.cdist` provides around a 2x speedup by avoiding CPU-GPU synchronization overhead. When doing so, `torch.std(unbiased=False)` must be used to match `np.std()` exactly.
+**Action:** Default to PyTorch native operations instead of NumPy for metrics inside components where tensors are likely to already be on the GPU. Ensure functions like `torch.triu_indices` explicitly set `device=tensor.device` to prevent hidden CPU memory allocations.
