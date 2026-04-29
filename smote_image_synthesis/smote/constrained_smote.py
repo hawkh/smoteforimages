@@ -704,19 +704,48 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Optimized to use batched scipy.spatial.distance.cdist to avoid O(N x M)
+        Python loops. Chunks processing to prevent OOM on large datasets.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
-        valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        from scipy.spatial.distance import cdist
 
+        valid_indices = []
+        unique_labels = np.unique(synthetic_labels)
+
+        for label in unique_labels:
+            syn_mask = synthetic_labels == label
+            syn_idx = np.where(syn_mask)[0]
+
+            if len(syn_idx) == 0:
+                continue
+
+            real_mask = self.labels == label
+            real_embs = self.embeddings[real_mask]
+
+            if len(real_embs) == 0:
+                continue
+
+            syn_embs = synthetic_embeddings[syn_idx]
+
+            # Process in chunks to prevent OOM
+            chunk_size = 2000
+            for i in range(0, len(syn_embs), chunk_size):
+                chunk_syn_embs = syn_embs[i:i+chunk_size]
+                chunk_syn_idx = syn_idx[i:i+chunk_size]
+
+                # Vectorized distance computation
+                dists = cdist(chunk_syn_embs, real_embs, metric='euclidean')
+                min_dists = np.min(dists, axis=1)
+
+                valid_chunk_idx = chunk_syn_idx[min_dists <= self.max_distance_threshold]
+                valid_indices.extend(valid_chunk_idx.tolist())
+
+        valid_indices.sort()
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
