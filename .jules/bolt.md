@@ -1,0 +1,3 @@
+## 2025-02-05 - Optimize _filter_by_distance with chunked cdist
+**Learning:** In `ConstrainedSMOTE`, the `_filter_by_distance` method used an unoptimized O(N x M) nested Python loop to compute distances between synthetic and original embeddings. While replacing it with a batched, vectorized `scipy.spatial.distance.cdist` calculation significantly improves performance (~28x speedup), computing distances between all points at once can cause OOM errors when processing large numbers of synthetic and original embeddings simultaneously.
+**Action:** When vectorizing pairwise distance calculations (like `cdist`), always process the inputs in manageable chunks (e.g., 2000 items) to prevent OOM errors while still retaining the performance benefits of vectorization.
