@@ -704,19 +704,47 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        ⚡ Bolt Optimization:
+        Replaced an O(N x M) nested Python loop with a batched, vectorized
+        scipy.spatial.distance.cdist calculation. The inputs are chunked
+        (e.g., 2000 items) to prevent OOM errors while processing large numbers
+        of synthetic and original embeddings simultaneously.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+        unique_labels = np.unique(synthetic_labels)
 
+        # We need cdist from scipy.spatial.distance
+        from scipy.spatial.distance import cdist
+
+        for label in unique_labels:
+            # Get indices and embeddings for current label in synthetic data
+            syn_idx = np.where(synthetic_labels == label)[0]
+            syn_embs = synthetic_embeddings[syn_idx]
+
+            # Get embeddings for current label in original data
+            orig_embs = self.embeddings[self.labels == label]
+            if len(orig_embs) == 0:
+                continue
+
+            # Process in chunks to avoid OOM
+            chunk_size = 2000
+            for i in range(0, len(syn_embs), chunk_size):
+                chunk_syn_embs = syn_embs[i:i + chunk_size]
+                chunk_syn_idx = syn_idx[i:i + chunk_size]
+
+                # Compute pairwise Euclidean distances using optimized cdist
+                dists = cdist(chunk_syn_embs, orig_embs, metric='euclidean')
+                min_dists = np.min(dists, axis=1)
+
+                valid_mask = min_dists <= self.max_distance_threshold
+                valid_indices.extend(chunk_syn_idx[valid_mask].tolist())
+
+        valid_indices.sort()
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
