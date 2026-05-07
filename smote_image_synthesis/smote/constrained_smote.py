@@ -13,6 +13,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
+import scipy.spatial.distance
 import logging
 import warnings
 
@@ -709,16 +710,31 @@ class ConstrainedSMOTE:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
-            label_mask = self.labels == label
-            label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+
+        for label in np.unique(synthetic_labels):
+            synth_mask = synthetic_labels == label
+            orig_mask = self.labels == label
+
+            if np.any(orig_mask) and np.any(synth_mask):
+                label_orig_emb = self.embeddings[orig_mask]
+                label_synth_emb = synthetic_embeddings[synth_mask]
+
+                synth_global_indices = np.where(synth_mask)[0]
+
+                # Process in chunks to avoid OOM for very large datasets
+                chunk_size = 2000
+                for i in range(0, len(label_synth_emb), chunk_size):
+                    chunk_synth = label_synth_emb[i:i + chunk_size]
+                    distances = scipy.spatial.distance.cdist(chunk_synth, label_orig_emb)
+                    min_distances = np.min(distances, axis=1)
+
+                    valid_chunk_indices = np.where(min_distances <= self.max_distance_threshold)[0]
+                    valid_indices.extend(synth_global_indices[i:i + chunk_size][valid_chunk_indices])
 
         if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
+            valid_indices_arr = np.array(valid_indices)
+            valid_indices_arr.sort()
+            return synthetic_embeddings[valid_indices_arr], synthetic_labels[valid_indices_arr]
         return np.array([]), np.array([])
 
     def _validate_input_data(
