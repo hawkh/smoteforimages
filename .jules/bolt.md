@@ -1,0 +1,3 @@
+## 2025-02-04 - [Optimize pairwise distance calculation]
+**Learning:** In PyTorch, using explicit dimension expansion (`unsqueeze(0) - unsqueeze(1)`) to compute pairwise distances is inefficient and causes high memory usage because it allocates an intermediate tensor of size O(K^2 * D).
+**Action:** Always use native `torch.cdist` (e.g., `torch.cdist(x, x, p=2)`) for pairwise distance calculations. It provides a memory-efficient O(K^2) execution and prevents OOM and latency spikes. Always explicitly cast input tensors to floating point numbers (`.float()`) as `torch.cdist` expects floating point inputs.
