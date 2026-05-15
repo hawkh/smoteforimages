@@ -567,8 +567,10 @@ class SynthesisPipeline:
             if class_embs.size(0) < 2:
                 continue
             # Pairwise distances
-            diff = class_embs.unsqueeze(0) - class_embs.unsqueeze(1)  # [K, K, D]
-            dists = diff.norm(dim=-1)  # [K, K]
+            # Optimization: Use torch.cdist instead of unsqueeze(0) - unsqueeze(1)
+            # to avoid O(K^2 * D) memory allocation. torch.cdist is O(K^2).
+            # Cast to float to ensure compatibility.
+            dists = torch.cdist(class_embs.float(), class_embs.float(), p=2.0).to(class_embs.dtype)
             # Upper triangle (exclude self-pairs)
             mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
             pair_dists = dists[mask_upper]
