@@ -1,0 +1,3 @@
+## 2025-03-02 - O(K^2 * D) Memory Bottleneck in PyTorch Pairwise Distance
+**Learning:** Computing pairwise L2 distances using explicit broadcasting (`tensor.unsqueeze(0) - tensor.unsqueeze(1)`) creates an intermediate tensor of size `[K, K, D]`. In performance-critical training loops (like `_compute_repulsion_loss` in `smote_image_synthesis/pipeline.py`), this causes severe memory allocation overhead and high latency compared to native optimized C++ routines.
+**Action:** Always use `torch.cdist(x, x, p=2.0)` (or `torch.pdist`) when calculating pairwise distances to perform O(K^2) execution and avoid unnecessary memory expansion, making sure to explicitly cast to `.float()` if needed.
