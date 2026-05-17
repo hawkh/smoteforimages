@@ -704,19 +704,46 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Uses batched vectorized cdist to drastically improve performance
+        compared to nested loops while limiting memory usage via chunking.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
+        import scipy.spatial.distance
+
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
+        unique_labels = np.unique(synthetic_labels)
+        chunk_size = 2000
+
+        for label in unique_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
 
+            if len(label_embeddings) == 0:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_idx = np.where(syn_mask)[0]
+            syn_label_embs = synthetic_embeddings[syn_idx]
+
+            if len(syn_label_embs) == 0:
+                continue
+
+            for i in range(0, len(syn_label_embs), chunk_size):
+                chunk = syn_label_embs[i:i + chunk_size]
+                chunk_idx = syn_idx[i:i + chunk_size]
+
+                # Compute pairwise distances between chunk and all original items of same class
+                dists = scipy.spatial.distance.cdist(chunk, label_embeddings)
+                min_dists = np.min(dists, axis=1)
+
+                valid_chunk_mask = min_dists <= self.max_distance_threshold
+                valid_indices.extend(chunk_idx[valid_chunk_mask].tolist())
+
+        valid_indices.sort()
         if valid_indices:
             return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
         return np.array([]), np.array([])
