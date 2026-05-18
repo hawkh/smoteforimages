@@ -566,9 +566,9 @@ class SynthesisPipeline:
             class_embs = embeddings[labels == lbl]  # [K, D]
             if class_embs.size(0) < 2:
                 continue
-            # Pairwise distances
-            diff = class_embs.unsqueeze(0) - class_embs.unsqueeze(1)  # [K, K, D]
-            dists = diff.norm(dim=-1)  # [K, K]
+            # Pairwise distances (Optimized: O(K^2) memory footprint instead of O(K^2 * D))
+            dists = torch.cdist(class_embs.float(), class_embs.float(), p=2.0)  # [K, K]
+
             # Upper triangle (exclude self-pairs)
             mask_upper = torch.triu(torch.ones_like(dists, dtype=torch.bool), diagonal=1)
             pair_dists = dists[mask_upper]
