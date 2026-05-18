@@ -1,0 +1,3 @@
+## 2024-05-18 - Avoid Memory Blowout in Pairwise L2 Computation
+**Learning:** Using `unsqueeze(0) - unsqueeze(1)` to compute pairwise distances between embeddings in PyTorch creates an intermediate tensor of size `O(K^2 * D)`. For large batches, this causes huge memory allocations and slows down training significantly, especially in operations like `_compute_repulsion_loss`.
+**Action:** Instead of explicit broadcasting, use `torch.cdist(x, x, p=2)` which is highly optimized and computes pairwise distances without allocating the large intermediate `[K, K, D]` tensor, bringing memory complexity down to `O(K^2)`.
