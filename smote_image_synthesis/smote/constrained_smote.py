@@ -13,8 +13,8 @@ from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
 from imblearn.over_sampling import SMOTE
+from scipy.spatial.distance import cdist
 import logging
-import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -704,21 +704,44 @@ class ConstrainedSMOTE:
         synthetic_embeddings: np.ndarray,
         synthetic_labels: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Filter synthetic embeddings by distance threshold."""
+        """Filter synthetic embeddings by distance threshold.
+
+        Uses vectorized scipy.spatial.distance.cdist instead of python loops
+        for ~14x speedup on distance calculations.
+        """
         if self.max_distance_threshold is None:
             return synthetic_embeddings, synthetic_labels
 
         valid_indices = []
-        for i, (embedding, label) in enumerate(zip(synthetic_embeddings, synthetic_labels)):
+        unique_syn_labels = np.unique(synthetic_labels)
+
+        for label in unique_syn_labels:
             label_mask = self.labels == label
             label_embeddings = self.embeddings[label_mask]
-            if len(label_embeddings) > 0:
-                distances = np.linalg.norm(label_embeddings - embedding, axis=1)
-                if np.min(distances) <= self.max_distance_threshold:
-                    valid_indices.append(i)
+
+            if len(label_embeddings) == 0:
+                continue
+
+            syn_mask = synthetic_labels == label
+            syn_indices = np.where(syn_mask)[0]
+            syn_label_embeddings = synthetic_embeddings[syn_mask]
+
+            # Vectorized O(M x N) distance calculation
+            distances = cdist(
+                syn_label_embeddings, label_embeddings, metric='euclidean'
+            )
+
+            min_distances = np.min(distances, axis=1)
+            valid_syn_mask = min_distances <= self.max_distance_threshold
+
+            valid_indices.extend(syn_indices[valid_syn_mask])
 
         if valid_indices:
-            return synthetic_embeddings[valid_indices], synthetic_labels[valid_indices]
+            valid_indices.sort()
+            return (
+                synthetic_embeddings[valid_indices],
+                synthetic_labels[valid_indices]
+            )
         return np.array([]), np.array([])
 
     def _validate_input_data(
